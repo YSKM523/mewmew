@@ -130,6 +130,33 @@ impl MewmewCore {
         fetch_memory(&connection, &id)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn reclassify_memory(
+        &self,
+        id: String,
+        kind: MemoryKind,
+        title: String,
+        due_at: Option<i64>,
+        question: Option<String>,
+        answer: Option<String>,
+        now: i64,
+    ) -> Result<Memory, CoreError> {
+        let connection = self.lock_connection()?;
+        let changed = connection.execute(
+            "UPDATE memories
+             SET kind = ?1, title = ?2, due_at = ?3, question = ?4, answer = ?5,
+                 updated_at = ?6
+             WHERE id = ?7 AND deleted_at IS NULL",
+            params![kind.as_db_value(), title, due_at, question, answer, now, id,],
+        )?;
+
+        if changed == 0 {
+            Err(CoreError::NotFound)
+        } else {
+            fetch_memory(&connection, &id)
+        }
+    }
+
     pub fn list_memories(&self, kind: Option<MemoryKind>) -> Result<Vec<Memory>, CoreError> {
         let connection = self.lock_connection()?;
 

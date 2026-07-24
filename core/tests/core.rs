@@ -254,3 +254,82 @@ fn deleted_memories_are_excluded_from_search() {
         .expect("search should work")
         .is_empty());
 }
+
+#[test]
+fn reclassifying_a_memory_updates_classification_fields_but_preserves_created_at() {
+    let db = TestDb::new();
+    let core = db.open_core();
+    let memory = core
+        .add_memory(note("明天下午三点交电费", "明天下午三点交电费"), 1_000)
+        .expect("initial note should be added");
+
+    let reclassified = core
+        .reclassify_memory(
+            memory.id,
+            MemoryKind::Reminder,
+            "交电费".to_owned(),
+            Some(2_000),
+            None,
+            None,
+            1_500,
+        )
+        .expect("note should be reclassified");
+
+    assert_eq!(reclassified.kind, MemoryKind::Reminder);
+    assert_eq!(reclassified.title, "交电费");
+    assert_eq!(reclassified.due_at, Some(2_000));
+    assert_eq!(reclassified.question, None);
+    assert_eq!(reclassified.answer, None);
+    assert_eq!(reclassified.created_at, 1_000);
+    assert_eq!(reclassified.updated_at, 1_500);
+}
+
+#[test]
+fn reclassifying_a_soft_deleted_memory_returns_not_found() {
+    let db = TestDb::new();
+    let core = db.open_core();
+    let memory = core
+        .add_memory(note("Soft deleted", "Deleted"), 100)
+        .expect("note should be added");
+    core.delete_memory(memory.id.clone(), 200)
+        .expect("note should soft-delete");
+
+    assert_eq!(
+        core.reclassify_memory(
+            memory.id,
+            MemoryKind::Card,
+            "Card".to_owned(),
+            None,
+            Some("Question?".to_owned()),
+            Some("Answer.".to_owned()),
+            300,
+        ),
+        Err(CoreError::NotFound)
+    );
+}
+
+#[test]
+fn reclassifying_a_memory_does_not_change_cat_fish() {
+    let db = TestDb::new();
+    let core = db.open_core();
+    let memory = core
+        .add_memory(note("ephemeral 是短暂的意思", "ephemeral 是短暂"), 100)
+        .expect("note should be added");
+    let fish_before = core.cat_status().expect("cat should be readable").fish;
+
+    core.reclassify_memory(
+        memory.id,
+        MemoryKind::Card,
+        "ephemeral".to_owned(),
+        None,
+        Some("ephemeral 是什么意思？".to_owned()),
+        Some("短暂的。".to_owned()),
+        200,
+    )
+    .expect("note should be reclassified");
+
+    assert_eq!(
+        core.cat_status().expect("cat should remain readable").fish,
+        fish_before
+    );
+}
