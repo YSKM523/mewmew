@@ -143,8 +143,10 @@ jobs:
         run: |
           # A missing token makes ParseClient a no-op *silently* by design, so
           # the only place this can be caught is here, against the real bundle.
-          plist="$(find "$DERIVED_DATA_PATH/Build/Products" -name Info.plist \
-            -path "*Mewmew.app/*" | head -1)"
+          # Must be the app's own plist: Mewmew.app also embeds the xctest
+          # bundle's Info.plist, which never carries app build settings.
+          plist="$(find "$DERIVED_DATA_PATH/Build/Products" \
+            -path "*/Mewmew.app/Info.plist" | head -1)"
           if [ -z "$plist" ]; then
             echo "::error::Could not find the built Mewmew.app Info.plist"
             exit 1
