@@ -21,25 +21,42 @@ struct CaptureSheet<SpeechCaptureType: SpeechCapturing>: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 20) {
-                TextField("想记住什么?", text: $text, axis: .vertical)
-                    .font(.title2)
-                    .foregroundStyle(Theme.primaryText)
-                    .lineLimit(4...10)
-                    .focused($isFocused)
-                    .textInputAutocapitalization(.sentences)
-                    .submitLabel(.done)
+            VStack(alignment: .leading, spacing: 16) {
+                // The field keeps a four-line minimum so the sheet does not
+                // jump as speech streams in. Without a visible container that
+                // reserved height reads as dead space and detaches whatever
+                // sits under it, so the input and its status share one card.
+                VStack(alignment: .leading, spacing: 14) {
+                    TextField("想记住什么?", text: $text, axis: .vertical)
+                        .font(.title3)
+                        .foregroundStyle(Theme.primaryText)
+                        .lineLimit(4...10)
+                        .focused($isFocused)
+                        .textInputAutocapitalization(.sentences)
+                        .submitLabel(.done)
 
-                if speechCapture.isRecording {
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(Theme.accent)
-                            .frame(width: 10, height: 10)
-                        Text("正在听…")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(Theme.secondaryText)
+                    if speechCapture.isRecording {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(Theme.accent)
+                                .frame(width: 8, height: 8)
+                            Text("正在听…")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Theme.secondaryText)
+                        }
+                        .accessibilityIdentifier("capture-recording-indicator")
                     }
-                    .accessibilityIdentifier("capture-recording-indicator")
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.surface)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+                .overlay {
+                    RoundedRectangle(cornerRadius: Theme.cornerRadius)
+                        .stroke(
+                            speechCapture.isRecording ? Theme.accent : Theme.border,
+                            lineWidth: Theme.borderWidth
+                        )
                 }
 
                 if let errorMessage = speechCapture.errorMessage {
