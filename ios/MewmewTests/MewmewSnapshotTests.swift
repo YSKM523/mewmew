@@ -1,3 +1,4 @@
+import Combine
 import SnapshotTesting
 import SwiftUI
 import XCTest
@@ -51,14 +52,40 @@ final class MewmewSnapshotTests: XCTestCase {
         assertLightAndDark(
             SettingsView(
                 appVersion: "1.0 (1)",
-                databasePath: "/Application Support/mewmew.sqlite3"
+                databasePath: "/Application Support/mewmew.sqlite3",
+                // Pinned: the real value depends on whether the build carried a
+                // token, which would make this snapshot flap.
+                isClassifierConfigured: true
             ),
             named: "settings"
         )
     }
 
+    func testCaptureSheetIdle() {
+        assertLightAndDark(
+            CaptureSheet(
+                speechCapture: FakeSpeechCapture(),
+                onSave: { _ in true }
+            ),
+            named: "capture-idle"
+        )
+    }
+
+    func testCaptureSheetRecordingWithPartialTranscript() {
+        assertLightAndDark(
+            CaptureSheet(
+                speechCapture: FakeSpeechCapture(
+                    transcript: "下周三下午三点提醒我交电费",
+                    isRecording: true
+                ),
+                onSave: { _ in true }
+            ),
+            named: "capture-recording"
+        )
+    }
+
     private func assertLightAndDark<V: View>(
-        _ view: V,
+        _ makeView: @autoclosure () -> V,
         named name: String,
         file: StaticString = #filePath,
         testName: String = #function,
@@ -68,7 +95,7 @@ final class MewmewSnapshotTests: XCTestCase {
 
         for scheme in [ColorScheme.light, .dark] {
             let themedView = AnyView(
-                view
+                makeView()
                     .environment(\.colorScheme, scheme)
                     .environment(\.locale, Locale(identifier: "zh_Hans_CN"))
             )
@@ -84,5 +111,32 @@ final class MewmewSnapshotTests: XCTestCase {
                 line: line
             )
         }
+    }
+}
+
+@MainActor
+private final class FakeSpeechCapture: SpeechCapturing {
+    @Published private(set) var transcript: String
+    @Published private(set) var isRecording: Bool
+    @Published private(set) var errorMessage: String?
+
+    init(
+        transcript: String = "",
+        isRecording: Bool = false,
+        errorMessage: String? = nil
+    ) {
+        self.transcript = transcript
+        self.isRecording = isRecording
+        self.errorMessage = errorMessage
+    }
+
+    func requestPermissions() async -> Bool {
+        true
+    }
+
+    func start() {}
+
+    func stop() {
+        isRecording = false
     }
 }

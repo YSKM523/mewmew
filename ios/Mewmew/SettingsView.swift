@@ -3,12 +3,19 @@ import SwiftUI
 struct SettingsView: View {
     let appVersion: String
     let databasePath: String
+    // Classification degrades silently on purpose, which would also hide a
+    // build that shipped without its token. Surface the distinction.
+    var isClassifierConfigured: Bool = ParseClient.isConfigured
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
                     LabeledContent("App 版本", value: appVersion)
+                    LabeledContent(
+                        "智能分类",
+                        value: isClassifierConfigured ? "已启用" : "未配置"
+                    )
                 }
                 .listRowBackground(Theme.surface)
 

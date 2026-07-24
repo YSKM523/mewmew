@@ -40,6 +40,10 @@ targets:
         CODE_SIGN_STYLE: Manual
         GENERATE_INFOPLIST_FILE: true
         INFOPLIST_KEY_CFBundleDisplayName: mewmew
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "把你说的话转成文字,交给猫记住。"
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "录下你说的话,转成文字后就删除。"
+        MEWMEW_APP_TOKEN: $(MEWMEW_APP_TOKEN)
+        INFOPLIST_KEY_MewmewAppToken: $(MEWMEW_APP_TOKEN)
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: false
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

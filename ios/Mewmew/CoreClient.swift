@@ -29,6 +29,26 @@ actor CoreClient {
         try instance().getMemory(id: id)
     }
 
+    func reclassifyMemory(
+        id: String,
+        kind: MemoryKind,
+        title: String,
+        dueAt: Int64?,
+        question: String?,
+        answer: String?,
+        now: Int64
+    ) throws -> Memory {
+        try instance().reclassifyMemory(
+            id: id,
+            kind: kind,
+            title: title,
+            dueAt: dueAt,
+            question: question,
+            answer: answer,
+            now: now
+        )
+    }
+
     func listMemories(kind: MemoryKind?) throws -> [Memory] {
         try instance().listMemories(kind: kind)
     }

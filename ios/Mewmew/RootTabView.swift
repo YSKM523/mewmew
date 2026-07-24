@@ -49,9 +49,10 @@ struct RootTabView: View {
         }
         .tint(Theme.accent)
         .sheet(isPresented: $model.isCapturePresented) {
-            CaptureSheet { text in
-                await model.captureNote(text)
-            }
+            CaptureSheet(
+                speechCapture: SpeechCapture(),
+                onSave: model.captureNote
+            )
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }

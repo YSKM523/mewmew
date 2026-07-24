@@ -101,6 +101,7 @@ jobs:
         env:
           DERIVED_DATA_PATH: ${{ runner.temp }}/MewmewDerivedData
           SOURCE_PACKAGES_PATH: ${{ github.workspace }}/.spm-cache
+          MEWMEW_APP_TOKEN: ${{ secrets.MEWMEW_APP_TOKEN }}
         run: |
           if [ -d "MewmewTests/__Snapshots__" ]; then
             SNAPSHOT_RECORD=0 xcodebuild \
@@ -135,6 +136,26 @@ jobs:
               CODE_SIGNING_ALLOWED=NO \
               test-without-building
           fi
+
+      - name: Verify the app token reached the bundle
+        env:
+          DERIVED_DATA_PATH: ${{ runner.temp }}/MewmewDerivedData
+        run: |
+          # A missing token makes ParseClient a no-op *silently* by design, so
+          # the only place this can be caught is here, against the real bundle.
+          plist="$(find "$DERIVED_DATA_PATH/Build/Products" -name Info.plist \
+            -path "*Mewmew.app/*" | head -1)"
+          if [ -z "$plist" ]; then
+            echo "::error::Could not find the built Mewmew.app Info.plist"
+            exit 1
+          fi
+          if ! plutil -extract MewmewAppToken raw "$plist" >/dev/null 2>&1; then
+            echo "::error::MewmewAppToken is absent from the built Info.plist;" \
+                 "the INFOPLIST_KEY_ route did not carry the value through"
+            plutil -p "$plist" | head -40
+            exit 1
+          fi
+          echo "MewmewAppToken present in the bundle"
 
       - name: Upload snapshot artifact
         if: always()
@@ -251,6 +272,7 @@ jobs:
           APPSTORE_P8: ${{ secrets.APPSTORE_P8 }}
           APPSTORE_TEAM_ID: ${{ secrets.APPSTORE_TEAM_ID }}
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MEWMEW_APP_TOKEN: ${{ secrets.MEWMEW_APP_TOKEN }}
           FASTLANE_SKIP_UPDATE_CHECK: "true"
         run: bundle exec fastlane beta
 
