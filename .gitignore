@@ -1,0 +1,20 @@
+# Rust
+/core/target/
+**/*.rs.bk
+
+# Xcode / generated
+/ios/*.xcodeproj/
+/ios/build/
+/core/build/
+DerivedData/
+*.xcuserstate
+
+# Snapshot test failures
+**/__Snapshots__/**/*.png.failure
+
+# Secrets — never commit
+*.p8
+*.p12
+*.mobileprovision
+.env
+.env.*

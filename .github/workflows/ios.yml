@@ -1,0 +1,168 @@
+name: iOS
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+    paths:
+      - "ios/**"
+      - "core/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-check:
+    name: Rust checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core -> target
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Run Clippy
+        run: cargo clippy -- -D warnings
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+  ios-build:
+    name: iOS build and snapshots
+    needs: rust-check
+    runs-on: macos-14
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust with Apple targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core -> target
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            .spm-cache
+          key: ${{ runner.os }}-spm-${{ hashFiles('ios/project.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Build Rust XCFramework and Swift bindings
+        run: core/build-swift.sh
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Build and run snapshot tests
+        working-directory: ios
+        env:
+          DERIVED_DATA_PATH: ${{ runner.temp }}/MewmewDerivedData
+          DESTINATION: platform=iOS Simulator,name=iPhone 15 Pro,OS=latest
+          SOURCE_PACKAGES_PATH: ${{ github.workspace }}/.spm-cache
+        run: |
+          if [ -d "MewmewTests/__Snapshots__" ]; then
+            SNAPSHOT_RECORD=0 xcodebuild \
+              -project Mewmew.xcodeproj \
+              -scheme Mewmew \
+              -destination "$DESTINATION" \
+              -derivedDataPath "$DERIVED_DATA_PATH" \
+              -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_PATH" \
+              CODE_SIGNING_ALLOWED=NO \
+              test
+          else
+            record_status=0
+            SNAPSHOT_RECORD=1 xcodebuild \
+              -project Mewmew.xcodeproj \
+              -scheme Mewmew \
+              -destination "$DESTINATION" \
+              -derivedDataPath "$DERIVED_DATA_PATH" \
+              -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_PATH" \
+              CODE_SIGNING_ALLOWED=NO \
+              test || record_status=$?
+
+            if [ "$record_status" -eq 0 ]; then
+              echo "::warning::Snapshot recording pass unexpectedly returned success."
+            fi
+
+            SNAPSHOT_RECORD=0 xcodebuild \
+              -project Mewmew.xcodeproj \
+              -scheme Mewmew \
+              -destination "$DESTINATION" \
+              -derivedDataPath "$DERIVED_DATA_PATH" \
+              -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_PATH" \
+              CODE_SIGNING_ALLOWED=NO \
+              test-without-building
+          fi
+
+      - name: Upload snapshot artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mewmew-ios-snapshots
+          path: ios/MewmewTests/__Snapshots__/
+          if-no-files-found: warn
+          retention-days: 14
+
+  testflight:
+    name: TestFlight skeleton
+    needs: ios-build
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-14
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Report required signing secrets
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+        run: |
+          for secret_name in \
+            ASC_KEY_ID \
+            ASC_ISSUER_ID \
+            ASC_KEY_P8 \
+            MATCH_PASSWORD \
+            MATCH_GIT_BASIC_AUTHORIZATION
+          do
+            if [ -z "${!secret_name:-}" ]; then
+              echo "::warning::$secret_name is required before TestFlight upload is enabled."
+            fi
+          done
+
+      # TODO: Add the Fastfile and match configuration, then run build_app and
+      # upload_to_testflight with the App Store Connect API key secrets above.
+      - name: TestFlight upload is not enabled yet
+        run: echo "TestFlight skeleton only; fastlane configuration is a later task."

@@ -1,0 +1,18 @@
+[package]
+name = "mewmew-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "mewmew_core"
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[dependencies]
+rusqlite = { version = "0.37", features = ["bundled"] }
+thiserror = "2"
+uniffi = { version = "0.29", features = ["cli"] }
+uuid = { version = "1", features = ["v4"] }
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
