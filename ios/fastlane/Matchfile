@@ -1,0 +1,6 @@
+git_url("git@github.com:YSKM523/mewmew-certs.git")
+storage_mode("git")
+
+type("appstore")
+app_identifier(["com.tensorproxies.mewmew"])
+readonly(false)

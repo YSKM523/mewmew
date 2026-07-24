@@ -1,0 +1,2 @@
+app_identifier("com.tensorproxies.mewmew")
+team_id(ENV.fetch("APPSTORE_TEAM_ID"))

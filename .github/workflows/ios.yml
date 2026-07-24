@@ -134,35 +134,118 @@ jobs:
           retention-days: 14
 
   testflight:
-    name: TestFlight skeleton
+    name: TestFlight upload
     needs: ios-build
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-14
+    # Serialize uploads: two concurrent runs would read the same latest build
+    # number and collide on upload.
+    concurrency:
+      group: testflight-upload
+      cancel-in-progress: false
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Report required signing secrets
+      - name: Validate required secrets
+        shell: bash
         env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_P8: ${{ secrets.APPSTORE_P8 }}
+          APPSTORE_TEAM_ID: ${{ secrets.APPSTORE_TEAM_ID }}
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
-          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+          MATCH_DEPLOY_KEY: ${{ secrets.MATCH_DEPLOY_KEY }}
         run: |
+          missing=0
           for secret_name in \
-            ASC_KEY_ID \
-            ASC_ISSUER_ID \
-            ASC_KEY_P8 \
+            APPSTORE_KEY_ID \
+            APPSTORE_ISSUER_ID \
+            APPSTORE_P8 \
+            APPSTORE_TEAM_ID \
             MATCH_PASSWORD \
-            MATCH_GIT_BASIC_AUTHORIZATION
+            MATCH_DEPLOY_KEY
           do
-            if [ -z "${!secret_name:-}" ]; then
-              echo "::warning::$secret_name is required before TestFlight upload is enabled."
+            if [ -z "${!secret_name}" ]; then
+              echo "::error::Missing required secret: $secret_name"
+              missing=1
             fi
           done
 
-      # TODO: Add the Fastfile and match configuration, then run build_app and
-      # upload_to_testflight with the App Store Connect API key secrets above.
-      - name: TestFlight upload is not enabled yet
-        run: echo "TestFlight skeleton only; fastlane configuration is a later task."
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Start SSH agent for match repository
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.MATCH_DEPLOY_KEY }}
+
+      - name: Trust GitHub SSH host keys
+        run: |
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Set up Ruby and fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+          working-directory: ios
+
+      - name: Install Rust with Apple targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core -> target
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Build Rust XCFramework and Swift bindings
+        run: core/build-swift.sh
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Create temporary signing keychain
+        shell: bash
+        run: |
+          keychain_path="$RUNNER_TEMP/mewmew-signing.keychain-db"
+          keychain_password="$(openssl rand -base64 32)"
+
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security list-keychains -d user -s \
+            "$keychain_path" \
+            "$HOME/Library/Keychains/login.keychain-db"
+
+          echo "MATCH_KEYCHAIN_NAME=$keychain_path" >> "$GITHUB_ENV"
+          echo "MATCH_KEYCHAIN_PASSWORD=$keychain_password" >> "$GITHUB_ENV"
+
+      - name: Build and upload to TestFlight
+        working-directory: ios
+        env:
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_P8: ${{ secrets.APPSTORE_P8 }}
+          APPSTORE_TEAM_ID: ${{ secrets.APPSTORE_TEAM_ID }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          FASTLANE_SKIP_UPDATE_CHECK: "true"
+        run: bundle exec fastlane beta
+
+      - name: Delete temporary signing keychain
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "${MATCH_KEYCHAIN_NAME:-}" ]; then
+            security delete-keychain "$MATCH_KEYCHAIN_NAME"
+          fi
