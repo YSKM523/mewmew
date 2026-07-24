@@ -49,18 +49,9 @@ actor ParseClient {
     /// Static so callers outside the actor can check configuration without
     /// awaiting; it only reads the bundle.
     static func resolvedToken() -> String? {
-        let configured = (
-            Bundle.main.object(forInfoDictionaryKey: "MewmewAppToken") as? String
-        )?
+        let configured = BuildConfig.appToken
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let configured,
-            !configured.isEmpty,
-            // An unexpanded build setting means the injection did not happen.
-            !configured.contains("$(")
-        else {
-            return nil
-        }
-        return configured
+        return configured.isEmpty ? nil : configured
     }
 
     static var isConfigured: Bool { resolvedToken() != nil }

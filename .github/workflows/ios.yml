@@ -79,6 +79,11 @@ jobs:
       - name: Build Rust XCFramework and Swift bindings
         run: core/build-swift.sh
 
+      - name: Inject the app token
+        env:
+          MEWMEW_APP_TOKEN: ${{ secrets.MEWMEW_APP_TOKEN }}
+        run: scripts/inject-app-token.sh
+
       - name: Generate Xcode project
         working-directory: ios
         run: xcodegen generate
@@ -137,27 +142,16 @@ jobs:
               test-without-building
           fi
 
-      - name: Verify the app token reached the bundle
-        env:
-          DERIVED_DATA_PATH: ${{ runner.temp }}/MewmewDerivedData
+      - name: Verify the app token was compiled in
         run: |
-          # A missing token makes ParseClient a no-op *silently* by design, so
-          # the only place this can be caught is here, against the real bundle.
-          # Must be the app's own plist: Mewmew.app also embeds the xctest
-          # bundle's Info.plist, which never carries app build settings.
-          plist="$(find "$DERIVED_DATA_PATH/Build/Products" \
-            -path "*/Mewmew.app/Info.plist" | head -1)"
-          if [ -z "$plist" ]; then
-            echo "::error::Could not find the built Mewmew.app Info.plist"
+          # Classification degrades silently by design, so a build shipped
+          # without its token would look identical to a working one.
+          if grep -q 'appToken = ""' ios/Mewmew/BuildConfig.swift; then
+            echo "::error::BuildConfig.appToken is still empty; the" \
+                 "MEWMEW_APP_TOKEN secret did not reach the build"
             exit 1
           fi
-          if ! plutil -extract MewmewAppToken raw "$plist" >/dev/null 2>&1; then
-            echo "::error::MewmewAppToken is absent from the built Info.plist;" \
-                 "the INFOPLIST_KEY_ route did not carry the value through"
-            plutil -p "$plist" | head -40
-            exit 1
-          fi
-          echo "MewmewAppToken present in the bundle"
+          echo "app token compiled in"
 
       - name: Upload snapshot artifact
         if: always()
@@ -245,6 +239,11 @@ jobs:
 
       - name: Build Rust XCFramework and Swift bindings
         run: core/build-swift.sh
+
+      - name: Inject the app token
+        env:
+          MEWMEW_APP_TOKEN: ${{ secrets.MEWMEW_APP_TOKEN }}
+        run: scripts/inject-app-token.sh
 
       - name: Generate Xcode project
         working-directory: ios
