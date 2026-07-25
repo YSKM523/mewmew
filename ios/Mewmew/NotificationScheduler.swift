@@ -98,7 +98,9 @@ final class SystemUserNotificationCenter: UserNotificationCenterServing {
 }
 
 @MainActor
-final class NotificationScheduler: NSObject, ObservableObject, NotificationScheduling {
+final class NotificationScheduler: NSObject, ObservableObject, NotificationScheduling,
+    UNUserNotificationCenterDelegate
+{
     static let categoryIdentifier = "reminder"
     static let completeActionIdentifier = "COMPLETE"
     static let snoozeActionIdentifier = "SNOOZE"
