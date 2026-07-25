@@ -137,7 +137,7 @@ final class Phase4ReviewTests: XCTestCase {
         XCTAssertEqual(receivedRatings, [.again, .good])
     }
 
-    func testNotificationReplayAddsOneQuietHoursAdjustedReviewDigest() async {
+    func testNotificationReplayAddsOneQuietHoursAdjustedReviewDigest() async throws {
         let calendar = makeCalendar()
         let nowDate = date(
             year: 2025,
@@ -161,7 +161,7 @@ final class Phase4ReviewTests: XCTestCase {
 
         XCTAssertEqual(state.scheduledCount, 1)
         XCTAssertEqual(center.requests.count, 1)
-        let request = center.requests[0]
+        let request = try XCTUnwrap(center.requests.first)
         XCTAssertEqual(
             request.identifier,
             NotificationScheduler.reviewDigestIdentifier
@@ -190,7 +190,7 @@ final class Phase4ReviewTests: XCTestCase {
         XCTAssertTrue(center.requests.isEmpty)
     }
 
-    func testNotificationReplayFindsTheNextFutureDueTime() async {
+    func testNotificationReplayFindsTheNextFutureDueTime() async throws {
         let calendar = makeCalendar()
         let nowDate = date(
             year: 2025,
@@ -225,9 +225,9 @@ final class Phase4ReviewTests: XCTestCase {
         let state = await scheduler.sync()
 
         XCTAssertEqual(state.scheduledCount, 1)
-        XCTAssertEqual(center.requests[0].content.title, "🐱 有 3 张卡片等你")
-        let trigger = center.requests[0].trigger
-            as? UNCalendarNotificationTrigger
+        let request = try XCTUnwrap(center.requests.first)
+        XCTAssertEqual(request.content.title, "🐱 有 3 张卡片等你")
+        let trigger = request.trigger as? UNCalendarNotificationTrigger
         XCTAssertEqual(trigger?.dateComponents.day, 3)
         XCTAssertEqual(trigger?.dateComponents.hour, 9)
         XCTAssertEqual(trigger?.dateComponents.minute, 0)
@@ -402,7 +402,8 @@ private actor FakeNotificationCore: CoreClientProtocol {
     }
 
     func nextCardDueAt(now: Int64) async throws -> Int64? {
-        nil
+        guard let nextDueAt, nextDueAt > now else { return nil }
+        return nextDueAt
     }
 
     func dueCards(limit: UInt32, now: Int64) async throws -> [Memory] {
