@@ -2,6 +2,7 @@
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use rusqlite::functions::FunctionFlags;
 use rusqlite::types::Type;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use uuid::Uuid;
@@ -94,6 +95,7 @@ impl MewmewCore {
     #[uniffi::constructor]
     pub fn new(db_path: String) -> Result<Arc<Self>, CoreError> {
         let mut connection = Connection::open(db_path)?;
+        register_sqlite_functions(&connection)?;
         run_migrations(&mut connection)?;
 
         Ok(Arc::new(Self {
@@ -183,6 +185,23 @@ impl MewmewCore {
         }
     }
 
+    pub fn pending_reminders(&self, limit: u32, now: i64) -> Result<Vec<Memory>, CoreError> {
+        let connection = self.lock_connection()?;
+        let mut statement = connection.prepare(
+            "SELECT id, kind, raw_text, title, due_at, completed_at, question, answer,
+                    created_at, updated_at
+             FROM memories
+             WHERE deleted_at IS NULL
+               AND kind = 'reminder'
+               AND completed_at IS NULL
+               AND due_at > ?1
+             ORDER BY due_at ASC, id ASC
+             LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![now, i64::from(limit)], memory_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     pub fn complete_reminder(&self, id: String, now: i64) -> Result<Memory, CoreError> {
         let mut connection = self.lock_connection()?;
         let transaction = connection.transaction()?;
@@ -213,6 +232,35 @@ impl MewmewCore {
         let completed = fetch_memory(&transaction, &id)?;
         transaction.commit()?;
         Ok(completed)
+    }
+
+    pub fn snooze_reminder(
+        &self,
+        id: String,
+        new_due_at: i64,
+        now: i64,
+    ) -> Result<Memory, CoreError> {
+        let connection = self.lock_connection()?;
+        let existing = fetch_memory(&connection, &id)?;
+
+        if existing.kind != MemoryKind::Reminder {
+            return Err(CoreError::Invalid(
+                "only reminders can be snoozed".to_owned(),
+            ));
+        }
+        if existing.completed_at.is_some() {
+            return Err(CoreError::Invalid(
+                "completed reminders cannot be snoozed".to_owned(),
+            ));
+        }
+
+        connection.execute(
+            "UPDATE memories
+             SET due_at = ?1, updated_at = ?2
+             WHERE id = ?3 AND deleted_at IS NULL",
+            params![new_due_at, now, id],
+        )?;
+        fetch_memory(&connection, &id)
     }
 
     pub fn delete_memory(&self, id: String, now: i64) -> Result<(), CoreError> {
@@ -266,6 +314,42 @@ impl MewmewCore {
         let rows = statement.query_map([pattern], memory_from_row)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
+
+    pub fn search_for_recall(&self, query: String, limit: u32) -> Result<Vec<Memory>, CoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        let Some((strict, loose)) = recall_match_queries(&query) else {
+            return Ok(Vec::new());
+        };
+
+        let connection = self.lock_connection()?;
+        let mut statement = connection.prepare(
+            "SELECT m.id, m.kind, m.raw_text, m.title, m.due_at, m.completed_at,
+                    m.question, m.answer, m.created_at, m.updated_at
+             FROM memories_fts
+             JOIN memories AS m ON m.rowid = memories_fts.rowid
+             WHERE memories_fts MATCH ?1
+               AND m.deleted_at IS NULL
+             ORDER BY bm25(memories_fts) ASC, m.updated_at DESC, m.id DESC
+             LIMIT ?2",
+        )?;
+
+        let mut run = |match_query: &str| -> rusqlite::Result<Vec<Memory>> {
+            statement
+                .query_map(params![match_query, i64::from(limit)], memory_from_row)?
+                .collect()
+        };
+
+        let hits = run(&strict)?;
+        // Widening only when the strict pass is empty keeps precise queries
+        // precise: recall should prefer a ranked near-miss over nothing.
+        if hits.is_empty() && loose != strict {
+            return Ok(run(&loose)?);
+        }
+        Ok(hits)
+    }
 }
 
 impl MewmewCore {
@@ -307,6 +391,106 @@ fn memory_from_row(row: &Row<'_>) -> rusqlite::Result<Memory> {
     })
 }
 
+fn register_sqlite_functions(connection: &Connection) -> Result<(), CoreError> {
+    connection.create_scalar_function(
+        "mewmew_fts_tokens",
+        1,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |context| {
+            let value = context.get::<Option<String>>(0)?;
+            Ok(value.map_or_else(String::new, |text| fts_tokens(&text)))
+        },
+    )?;
+    Ok(())
+}
+
+fn is_cjk(character: char) -> bool {
+    matches!(
+        character as u32,
+        0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xF900..=0xFAFF
+            | 0x20000..=0x2FA1F
+            | 0x30000..=0x323AF
+    )
+}
+
+fn fts_tokens(value: &str) -> String {
+    fn flush_current(current: &mut String, tokens: &mut Vec<String>) {
+        if !current.is_empty() {
+            tokens.push(std::mem::take(current));
+        }
+    }
+
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    for character in value.chars() {
+        if is_cjk(character) {
+            flush_current(&mut current, &mut tokens);
+            tokens.push(character.to_string());
+        } else if character.is_alphanumeric() || character == '_' {
+            current.extend(character.to_lowercase());
+        } else {
+            flush_current(&mut current, &mut tokens);
+        }
+    }
+    flush_current(&mut current, &mut tokens);
+    tokens.join(" ")
+}
+
+/// Function words and question particles. People ask "护照在哪", not "护照" —
+/// under AND semantics the stray 在/哪 characters are enough to match nothing,
+/// since no stored memory contains them.
+const CJK_STOPWORDS: &[char] = &[
+    '的', '了', '是', '在', '吗', '呢', '吧', '啊', '我', '你', '他', '她', '它', '们', '这', '那',
+    '哪', '什', '么', '怎', '谁', '请', '问', '有', '把', '被', '就', '也', '还', '和', '与', '及',
+    '对', '从', '给', '让', '之', '地', '得', '过', '呀', '嘛',
+];
+
+fn is_stopword(token: &str) -> bool {
+    let mut chars = token.chars();
+    match (chars.next(), chars.next()) {
+        (Some(single), None) => CJK_STOPWORDS.contains(&single),
+        _ => false,
+    }
+}
+
+fn quote_tokens(tokens: &[String], joiner: &str) -> String {
+    tokens
+        .iter()
+        .map(|token| format!("\"{}\"", token.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(joiner)
+}
+
+/// The strict query (every meaningful token present) and a loose fallback
+/// (any token). Callers try strict first so precise queries stay precise, and
+/// only widen when that finds nothing.
+fn recall_match_queries(query: &str) -> Option<(String, String)> {
+    let tokenized = fts_tokens(query);
+    let all: Vec<String> = tokenized.split_whitespace().map(str::to_owned).collect();
+    if all.is_empty() {
+        return None;
+    }
+
+    let meaningful: Vec<String> = all
+        .iter()
+        .filter(|token| !is_stopword(token))
+        .cloned()
+        .collect();
+    // A query of nothing but particles still deserves an attempt.
+    let strict_source = if meaningful.is_empty() {
+        &all
+    } else {
+        &meaningful
+    };
+
+    Some((
+        quote_tokens(strict_source, " AND "),
+        quote_tokens(&all, " OR "),
+    ))
+}
+
 fn migrations() -> Vec<&'static str> {
     vec![
         "
@@ -342,6 +526,59 @@ fn migrations() -> Vec<&'static str> {
           updated_at INTEGER NOT NULL
         );
         INSERT OR IGNORE INTO cat (id, updated_at) VALUES (1, 0);
+        ",
+        "
+        CREATE VIRTUAL TABLE memories_fts USING fts5(
+          raw_text,
+          title,
+          question,
+          answer,
+          tokenize = 'unicode61'
+        );
+
+        INSERT INTO memories_fts (rowid, raw_text, title, question, answer)
+        SELECT
+          rowid,
+          mewmew_fts_tokens(raw_text),
+          mewmew_fts_tokens(title),
+          mewmew_fts_tokens(question),
+          mewmew_fts_tokens(answer)
+        FROM memories
+        WHERE deleted_at IS NULL;
+
+        CREATE TRIGGER memories_fts_after_insert
+        AFTER INSERT ON memories
+        WHEN new.deleted_at IS NULL
+        BEGIN
+          INSERT INTO memories_fts (rowid, raw_text, title, question, answer)
+          VALUES (
+            new.rowid,
+            mewmew_fts_tokens(new.raw_text),
+            mewmew_fts_tokens(new.title),
+            mewmew_fts_tokens(new.question),
+            mewmew_fts_tokens(new.answer)
+          );
+        END;
+
+        CREATE TRIGGER memories_fts_after_update
+        AFTER UPDATE ON memories
+        BEGIN
+          DELETE FROM memories_fts WHERE rowid = old.rowid;
+          INSERT INTO memories_fts (rowid, raw_text, title, question, answer)
+          SELECT
+            new.rowid,
+            mewmew_fts_tokens(new.raw_text),
+            mewmew_fts_tokens(new.title),
+            mewmew_fts_tokens(new.question),
+            mewmew_fts_tokens(new.answer)
+          WHERE new.deleted_at IS NULL;
+        END;
+
+        CREATE TRIGGER memories_fts_after_delete
+        AFTER DELETE ON memories
+        BEGIN
+          DELETE FROM memories_fts WHERE rowid = old.rowid;
+        END;
         ",
     ]
 }

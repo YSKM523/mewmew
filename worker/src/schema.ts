@@ -18,6 +18,11 @@ export interface ParseResult {
   confidence: number;
 }
 
+export interface RecallModelResult {
+  answer: string;
+  cited_ids: string[];
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -90,5 +95,26 @@ export function parseModelContent(content: string): ModelResult {
     question: value.kind === "card" ? question : null,
     answer: value.kind === "card" ? answer : null,
     confidence: value.confidence,
+  };
+}
+
+export function parseRecallModelContent(content: string): RecallModelResult {
+  const value: unknown = JSON.parse(content);
+  if (!isRecord(value)) {
+    throw new Error("recall model content must be a JSON object");
+  }
+  if (typeof value.answer !== "string" || value.answer.length === 0) {
+    throw new Error("recall answer must be a non-empty string");
+  }
+  if (
+    !Array.isArray(value.cited_ids) ||
+    !value.cited_ids.every((id) => typeof id === "string")
+  ) {
+    throw new Error("recall cited_ids must be an array of strings");
+  }
+
+  return {
+    answer: value.answer,
+    cited_ids: value.cited_ids,
   };
 }

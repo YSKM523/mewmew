@@ -1,8 +1,10 @@
 import {
   fallbackResult,
   parseModelContent,
+  parseRecallModelContent,
   type ModelResult,
   type ParseResult,
+  type RecallModelResult,
 } from "./schema";
 import { zonedLocalIsoToUnixSeconds } from "./timezone";
 
@@ -17,6 +19,24 @@ interface ParseInput {
   text: string;
   tz: string;
   now: string;
+}
+
+interface RecallMemory {
+  id: string;
+  kind: "reminder" | "card" | "note";
+  title: string;
+  raw_text: string;
+  created_at: number;
+}
+
+interface RecallInput {
+  question: string;
+  memories: RecallMemory[];
+}
+
+interface RecallResult {
+  answer: string;
+  cited_ids: string[];
 }
 
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
@@ -39,6 +59,25 @@ kind 三选一:
 
 当前时间: {now},时区 {tz}`;
 
+const RECALL_SYSTEM_PROMPT = `你是记忆助手的召回答案器。只输出 JSON,不要解释。
+
+只依据用户消息中给出的 memories 回答 question。没有足够依据时必须明确说不知道,严禁补充、猜测或编造任何记忆中没有的信息。
+answer 最多两句话。
+cited_ids 必须列出答案实际引用的 memory id,且只能使用输入 memories 中存在的 id;没有引用时返回空数组。
+
+输出格式:
+{"answer":"回答","cited_ids":["memory-id"]}`;
+
+const EMPTY_RECALL_RESULT: RecallResult = {
+  answer: "我没记过这个",
+  cited_ids: [],
+};
+
+const FALLBACK_RECALL_RESULT: RecallResult = {
+  answer: "猫有点困,先看看这些记忆吧",
+  cited_ids: [],
+};
+
 function jsonResponse(value: unknown, status = 200): Response {
   return Response.json(value, {
     status,
@@ -60,6 +99,44 @@ function parseInput(value: unknown): ParseInput {
     throw new Error("request body is invalid");
   }
   return { text: value.text, tz: value.tz, now: value.now };
+}
+
+function isMemoryKind(value: unknown): value is RecallMemory["kind"] {
+  return value === "reminder" || value === "card" || value === "note";
+}
+
+function parseRecallInput(value: unknown): RecallInput {
+  if (
+    !isRecord(value) ||
+    typeof value.question !== "string" ||
+    !Array.isArray(value.memories)
+  ) {
+    throw new Error("recall request body is invalid");
+  }
+
+  const memories = value.memories.map((memory): RecallMemory => {
+    if (
+      !isRecord(memory) ||
+      typeof memory.id !== "string" ||
+      memory.id.length === 0 ||
+      !isMemoryKind(memory.kind) ||
+      typeof memory.title !== "string" ||
+      typeof memory.raw_text !== "string" ||
+      typeof memory.created_at !== "number" ||
+      !Number.isSafeInteger(memory.created_at)
+    ) {
+      throw new Error("recall memory is invalid");
+    }
+    return {
+      id: memory.id,
+      kind: memory.kind,
+      title: memory.title,
+      raw_text: memory.raw_text,
+      created_at: memory.created_at,
+    };
+  });
+
+  return { question: value.question, memories };
 }
 
 function quotaFromEnv(value: string | undefined): number {
@@ -111,6 +188,23 @@ async function consumeQuota(env: Env, token: string): Promise<boolean> {
   return true;
 }
 
+async function guardRequest(request: Request, env: Env): Promise<Response | null> {
+  if (env.APP_TOKEN === undefined || env.APP_TOKEN.length === 0) {
+    return jsonResponse({ error: "APP_TOKEN is not configured" }, 500);
+  }
+
+  const token = request.headers.get("X-Mewmew-Token");
+  if (token !== env.APP_TOKEN) {
+    return jsonResponse({ error: "unauthorized" }, 401);
+  }
+
+  if (!(await consumeQuota(env, token))) {
+    return jsonResponse({ error: "daily quota exceeded" }, 429);
+  }
+
+  return null;
+}
+
 function promptFor(input: ParseInput): string {
   return SYSTEM_PROMPT.replace("{now}", input.now).replace("{tz}", input.tz);
 }
@@ -130,7 +224,11 @@ function modelContent(value: unknown): string {
   return content;
 }
 
-async function callDeepSeek(input: ParseInput, apiKey: string): Promise<ModelResult> {
+async function callDeepSeek(
+  systemPrompt: string,
+  userContent: string,
+  apiKey: string,
+): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DEEPSEEK_TIMEOUT_MS);
 
@@ -144,8 +242,8 @@ async function callDeepSeek(input: ParseInput, apiKey: string): Promise<ModelRes
       body: JSON.stringify({
         model: "deepseek-v4-flash",
         messages: [
-          { role: "system", content: promptFor(input) },
-          { role: "user", content: input.text },
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userContent },
         ],
         temperature: 0,
         response_format: { type: "json_object" },
@@ -157,10 +255,50 @@ async function callDeepSeek(input: ParseInput, apiKey: string): Promise<ModelRes
       throw new Error(`DeepSeek returned HTTP ${response.status}`);
     }
 
-    return parseModelContent(modelContent(await response.json()));
+    return modelContent(await response.json());
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function parseWithDeepSeek(
+  input: ParseInput,
+  apiKey: string,
+): Promise<ModelResult> {
+  const content = await callDeepSeek(
+    promptFor(input),
+    input.text,
+    apiKey,
+  );
+  return parseModelContent(content);
+}
+
+async function recallWithDeepSeek(
+  input: RecallInput,
+  apiKey: string,
+): Promise<RecallModelResult> {
+  const content = await callDeepSeek(
+    RECALL_SYSTEM_PROMPT,
+    JSON.stringify(input),
+    apiKey,
+  );
+  return parseRecallModelContent(content);
+}
+
+function toRecallResult(
+  model: RecallModelResult,
+  input: RecallInput,
+): RecallResult {
+  const allowedIds = new Set(input.memories.map((memory) => memory.id));
+  const seenIds = new Set<string>();
+  const citedIds = model.cited_ids.filter((id) => {
+    if (!allowedIds.has(id) || seenIds.has(id)) {
+      return false;
+    }
+    seenIds.add(id);
+    return true;
+  });
+  return { answer: model.answer, cited_ids: citedIds };
 }
 
 function toParseResult(model: ModelResult, timeZone: string): ParseResult {
@@ -179,17 +317,9 @@ function toParseResult(model: ModelResult, timeZone: string): ParseResult {
 }
 
 async function handleParse(request: Request, env: Env): Promise<Response> {
-  if (env.APP_TOKEN === undefined || env.APP_TOKEN.length === 0) {
-    return jsonResponse({ error: "APP_TOKEN is not configured" }, 500);
-  }
-
-  const token = request.headers.get("X-Mewmew-Token");
-  if (token !== env.APP_TOKEN) {
-    return jsonResponse({ error: "unauthorized" }, 401);
-  }
-
-  if (!(await consumeQuota(env, token))) {
-    return jsonResponse({ error: "daily quota exceeded" }, 429);
+  const guardResponse = await guardRequest(request, env);
+  if (guardResponse !== null) {
+    return guardResponse;
   }
 
   let rawBody: unknown;
@@ -215,10 +345,41 @@ async function handleParse(request: Request, env: Env): Promise<Response> {
     ) {
       throw new Error("DEEPSEEK_API_KEY is not configured");
     }
-    const model = await callDeepSeek(input, env.DEEPSEEK_API_KEY);
+    const model = await parseWithDeepSeek(input, env.DEEPSEEK_API_KEY);
     return jsonResponse(toParseResult(model, input.tz));
   } catch {
     return jsonResponse(fallbackResult(input.text));
+  }
+}
+
+async function handleRecall(request: Request, env: Env): Promise<Response> {
+  const guardResponse = await guardRequest(request, env);
+  if (guardResponse !== null) {
+    return guardResponse;
+  }
+
+  let input: RecallInput;
+  try {
+    input = parseRecallInput(await request.json());
+  } catch {
+    return jsonResponse(FALLBACK_RECALL_RESULT);
+  }
+
+  if (input.memories.length === 0) {
+    return jsonResponse(EMPTY_RECALL_RESULT);
+  }
+
+  try {
+    if (
+      env.DEEPSEEK_API_KEY === undefined ||
+      env.DEEPSEEK_API_KEY.length === 0
+    ) {
+      throw new Error("DEEPSEEK_API_KEY is not configured");
+    }
+    const model = await recallWithDeepSeek(input, env.DEEPSEEK_API_KEY);
+    return jsonResponse(toRecallResult(model, input));
+  } catch {
+    return jsonResponse(FALLBACK_RECALL_RESULT);
   }
 }
 
@@ -229,9 +390,14 @@ export default {
     _context: ExecutionContext,
   ): Promise<Response> {
     const url = new URL(request.url);
-    if (request.method !== "POST" || url.pathname !== "/v1/parse") {
-      return jsonResponse({ error: "not found" }, 404);
+    if (request.method === "POST") {
+      if (url.pathname === "/v1/parse") {
+        return handleParse(request, env);
+      }
+      if (url.pathname === "/v1/recall") {
+        return handleRecall(request, env);
+      }
     }
-    return handleParse(request, env);
+    return jsonResponse({ error: "not found" }, 404);
   },
 };
