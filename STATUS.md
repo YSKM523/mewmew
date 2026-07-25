@@ -14,13 +14,14 @@
 - ✅ **Phase 1**:骨架落地并 CI 全绿。Rust core(6 测试)+ SwiftUI 三页(猫主页/记忆列表/设置)+ UniFFI 链路 + 快照测试。commit 7d8bbb3。**macOS runner 真 Xcode 编译通过,快照渲染正确**。
 - ✅ **Phase 0.5**:TestFlight 全链路通。fastlane `beta` lane(API key → match → build_app → upload)+ macos-26 runner。**build 1 已上传,Apple 侧 VALID**。App 记录与 Bundle ID 已建(app id 6794423533)。
 - ✅ **Phase 2**:core `reclassify_memory` + Worker `/v1/parse` + iOS 语音 capture。**Worker 线上 https://mewmew-api.pp-account.workers.dev,生产实测 6/6 分类正确、时间落在调用方时区**。
-- ⏳ **Phase 3 起**:本地通知提醒 + 问猫召回,未开工。
+- ✅ **Phase 3**:提醒 + 召回闭环。core `pending_reminders`/`snooze_reminder`/中文 FTS `search_for_recall`;Worker `/v1/recall` **已上线实测**;iOS 通知调度(全量重放,上限 56)+ 猫口吻通知(「记下了」/「等会儿」)+ 问猫 UI。
+- ⏳ **Phase 4 起**:FSRS 间隔重复 + 考问会话,未开工。
 
 ## 线上资源
 
 | 资源 | 值 |
 |---|---|
-| Worker | https://mewmew-api.pp-account.workers.dev(`POST /v1/parse`) |
+| Worker | https://mewmew-api.pp-account.workers.dev(`POST /v1/parse`、`POST /v1/recall`) |
 | KV(每日配额) | `RATE_LIMIT` = ead390002d5a48f7b664d0c22e45a96e |
 | Worker secrets | `APP_TOKEN`、`DEEPSEEK_API_KEY` |
 | App Store Connect | app id 6794423533,Bundle ID 45ZYJ5953A |
@@ -38,3 +39,7 @@ docs/core-spec.md · docs/ui-spec.md · docs/ios-ci-spec.md · docs/worker-spec.
 - **分类失败一律静默降级**是刻意设计(capture 不能失败),代价是配置错误也无声无息 —— 所以设置页有"智能分类"状态行、CI 有 token 断言。
 - Apple 要求 iOS 26 SDK 才收包(macos-14 runner 的 Xcode 15 会被拒);app 图标/启动画面/屏幕方向缺一个都会被上传校验拦下。
 - Cloudflare 会挡 `Python-urllib` 默认 UA(403),写监控脚本记得设 User-Agent。
+- **中文召回**:FTS5 逐字建索引;查询要去掉功能词/疑问词(在/哪/吗…)再 AND,空结果时退化成 OR。裸关键词测试会掩盖问题——真实问法是"护照在哪"而不是"护照",回归测试在 `core/tests/recall_phrasing.rs`。
+- **OR 兜底会有假阳性**(飞机→咖啡机),这是刻意的:检索多召回、模型守住不编造(已实测)。别当 bug 去"修"。
+- iOS 本地通知 pending 上限 64,超出静默丢弃 → 只排 56 条并在设置页显示实际排期数。
+- **Swift 并发隔离/协议遵循只能靠 CI 兜**(Linux 无编译器):@MainActor 类型不能直接当默认参数、实现了 delegate 方法≠声明了遵循。
