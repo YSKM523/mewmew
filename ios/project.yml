@@ -45,6 +45,10 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: false
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Without this the build uploads and reports VALID, but sits at
+        # "missing compliance" and cannot be installed by any tester. The app
+        # only uses HTTPS, which is exempt.
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: false
         # App Store validation rejects bundles without a launch screen and
         # explicit orientations; both are generated from these keys.
         INFOPLIST_KEY_UILaunchScreen_Generation: true

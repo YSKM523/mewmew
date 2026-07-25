@@ -38,6 +38,8 @@ docs/core-spec.md · docs/ui-spec.md · docs/ios-ci-spec.md · docs/worker-spec.
 - core API 时间由调用方传 now(unix 秒),core 不读系统时钟。
 - **`INFOPLIST_KEY_<自定义键>` 不会进 Info.plist**(CI 实证)。app token 走 `scripts/inject-app-token.sh` 写 `BuildConfig.swift` 编译期注入,CI 有断言防止静默漏配。
 - **分类失败一律静默降级**是刻意设计(capture 不能失败),代价是配置错误也无声无息 —— 所以设置页有"智能分类"状态行、CI 有 token 断言。
+- **上传成功 ≠ 测试员能装**:构建的 `usesNonExemptEncryption` 为 null 时,API 仍报 `processingState=VALID`,但对测试员不可安装(网页显示"缺少合规信息"),邀请会以 `NO_INSTALLABLE_BUILDS` 失败。project.yml 已加 `INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: false` 永久解决。
+- TestFlight 还需要**测试组 + 测试员**才可见:内部组 `内部测试`(id 2d3878ff-3150-47d1-b4b8-afd7bc412c6f,hasAccessToAllBuilds),测试员 wukongkong07@gmail.com。内部组不能手动关联构建(422 是正常的,它自动含全部)。
 - Apple 要求 iOS 26 SDK 才收包(macos-14 runner 的 Xcode 15 会被拒);app 图标/启动画面/屏幕方向缺一个都会被上传校验拦下。
 - Cloudflare 会挡 `Python-urllib` 默认 UA(403),写监控脚本记得设 User-Agent。
 - **中文召回**:FTS5 逐字建索引;查询要去掉功能词/疑问词(在/哪/吗…)再 AND,空结果时退化成 OR。裸关键词测试会掩盖问题——真实问法是"护照在哪"而不是"护照",回归测试在 `core/tests/recall_phrasing.rs`。

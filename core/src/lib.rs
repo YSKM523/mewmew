@@ -75,6 +75,7 @@ pub struct CatStatus {
     pub xp: i64,
     pub fish: i64,
     pub mood: String,
+    pub outfit: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -352,7 +353,9 @@ impl MewmewCore {
 
         if earned_fish {
             transaction.execute(
-                "UPDATE cat SET fish = fish + 1, updated_at = ?1 WHERE id = 1",
+                "UPDATE cat
+                 SET fish = fish + 1, last_interaction_at = ?1, updated_at = ?1
+                 WHERE id = 1",
                 [now],
             )?;
         }
@@ -390,7 +393,9 @@ impl MewmewCore {
             params![now, id],
         )?;
         transaction.execute(
-            "UPDATE cat SET fish = fish + 1, updated_at = ?1 WHERE id = 1",
+            "UPDATE cat
+             SET fish = fish + 1, last_interaction_at = ?1, updated_at = ?1
+             WHERE id = 1",
             [now],
         )?;
 
@@ -446,18 +451,72 @@ impl MewmewCore {
 
     pub fn cat_status(&self) -> Result<CatStatus, CoreError> {
         let connection = self.lock_connection()?;
-        Ok(connection.query_row(
-            "SELECT level, xp, fish, mood FROM cat WHERE id = 1",
-            [],
-            |row| {
-                Ok(CatStatus {
-                    level: row.get(0)?,
-                    xp: row.get(1)?,
-                    fish: row.get(2)?,
-                    mood: row.get(3)?,
-                })
-            },
-        )?)
+        fetch_cat_status(&connection, None)
+    }
+
+    pub fn cat_status_at(&self, now: i64) -> Result<CatStatus, CoreError> {
+        let connection = self.lock_connection()?;
+        fetch_cat_status(&connection, Some(now))
+    }
+
+    pub fn feed_cat(&self, now: i64) -> Result<CatStatus, CoreError> {
+        let mut connection = self.lock_connection()?;
+        let transaction = connection.transaction()?;
+        let changed = transaction.execute(
+            "UPDATE cat
+             SET fish = fish - 1,
+                 xp = xp + 10,
+                 last_interaction_at = ?1,
+                 updated_at = ?1
+             WHERE id = 1 AND fish > 0",
+            [now],
+        )?;
+
+        if changed == 0 {
+            return Err(CoreError::Invalid("没有小鱼干了".to_owned()));
+        }
+
+        let status = fetch_cat_status(&transaction, Some(now))?;
+        transaction.commit()?;
+        Ok(status)
+    }
+
+    pub fn unlocked_outfits(&self) -> Result<Vec<String>, CoreError> {
+        let connection = self.lock_connection()?;
+        let level = fetch_cat_status(&connection, None)?.level;
+        Ok(outfits_for_level(level)
+            .into_iter()
+            .map(str::to_owned)
+            .collect())
+    }
+
+    pub fn set_outfit(&self, outfit: String, now: i64) -> Result<CatStatus, CoreError> {
+        let required_level = outfit_required_level(&outfit)
+            .ok_or_else(|| CoreError::Invalid(format!("未知装扮: {outfit}")))?;
+        let mut connection = self.lock_connection()?;
+        let transaction = connection.transaction()?;
+        let xp: i64 =
+            transaction.query_row("SELECT xp FROM cat WHERE id = 1", [], |row| row.get(0))?;
+        let level = level_for_xp(xp);
+
+        if level < required_level {
+            return Err(CoreError::Invalid(format!(
+                "装扮 {outfit} 需要 Lv.{required_level} 解锁"
+            )));
+        }
+
+        transaction.execute(
+            "UPDATE cat
+             SET outfit = ?1,
+                 level = ?2,
+                 last_interaction_at = ?3,
+                 updated_at = ?3
+             WHERE id = 1",
+            params![outfit, level, now],
+        )?;
+        let status = fetch_cat_status(&transaction, Some(now))?;
+        transaction.commit()?;
+        Ok(status)
     }
 
     pub fn search(&self, query_text: String) -> Result<Vec<Memory>, CoreError> {
@@ -523,6 +582,108 @@ impl MewmewCore {
             .lock()
             .map_err(|_| CoreError::Db("database mutex was poisoned".to_owned()))
     }
+}
+
+fn level_for_xp(xp: i64) -> i64 {
+    if xp < 30 {
+        return 1;
+    }
+    if xp < 80 {
+        return 2;
+    }
+
+    fn threshold(level: i64) -> i128 {
+        let level = i128::from(level);
+        20 * (level - 2) * (level - 1) + 40
+    }
+
+    let xp = i128::from(xp);
+    let mut low = 3;
+    let mut high = 1_000_000_000;
+    while low < high {
+        let middle = low + (high - low + 1) / 2;
+        if threshold(middle) <= xp {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+    low
+}
+
+fn mood_at(last_interaction_at: Option<i64>, now: i64) -> &'static str {
+    let Some(last_interaction_at) = last_interaction_at else {
+        return "happy";
+    };
+    let elapsed = now.saturating_sub(last_interaction_at);
+    if elapsed < 24 * 60 * 60 {
+        "happy"
+    } else if elapsed <= 72 * 60 * 60 {
+        "content"
+    } else {
+        "sleepy"
+    }
+}
+
+fn outfit_required_level(outfit: &str) -> Option<i64> {
+    match outfit {
+        "none" => Some(1),
+        "scarf" => Some(2),
+        "glasses" => Some(4),
+        _ => None,
+    }
+}
+
+fn outfits_for_level(level: i64) -> Vec<&'static str> {
+    ["none", "scarf", "glasses"]
+        .into_iter()
+        .filter(|outfit| {
+            outfit_required_level(outfit).is_some_and(|required_level| level >= required_level)
+        })
+        .collect()
+}
+
+fn fetch_cat_status(
+    connection: &Connection,
+    now: Option<i64>,
+) -> Result<CatStatus, CoreError> {
+    let (cached_level, xp, fish, stored_mood, last_interaction_at, outfit): (
+        i64,
+        i64,
+        i64,
+        String,
+        Option<i64>,
+        String,
+    ) = connection.query_row(
+        "SELECT level, xp, fish, mood, last_interaction_at, outfit
+         FROM cat
+         WHERE id = 1",
+        [],
+        |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+            ))
+        },
+    )?;
+    let level = level_for_xp(xp);
+    if cached_level != level {
+        connection.execute("UPDATE cat SET level = ?1 WHERE id = 1", [level])?;
+    }
+
+    Ok(CatStatus {
+        level,
+        xp,
+        fish,
+        mood: now.map_or(stored_mood, |now| {
+            mood_at(last_interaction_at, now).to_owned()
+        }),
+        outfit,
+    })
 }
 
 fn unix_timestamp(timestamp: i64) -> Result<DateTime<Utc>, CoreError> {
@@ -846,6 +1007,13 @@ fn migrations() -> Vec<&'static str> {
         SET fsrs_due = created_at
         WHERE kind = 'card' AND fsrs_due IS NULL;
         ",
+        "
+        ALTER TABLE cat ADD COLUMN last_interaction_at INTEGER;
+        ALTER TABLE cat
+          ADD COLUMN outfit TEXT NOT NULL DEFAULT 'none';
+
+        UPDATE cat SET last_interaction_at = updated_at;
+        ",
     ]
 }
 
@@ -873,6 +1041,13 @@ fn run_migrations(connection: &mut Connection) -> Result<(), CoreError> {
         transaction.execute(
             "INSERT INTO schema_version (version) VALUES (?1)",
             [version],
+        )?;
+    }
+
+    if current_version == 0 {
+        transaction.execute(
+            "UPDATE cat SET last_interaction_at = NULL WHERE id = 1",
+            [],
         )?;
     }
 
