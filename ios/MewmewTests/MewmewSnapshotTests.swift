@@ -19,7 +19,7 @@ final class MewmewSnapshotTests: XCTestCase {
                 dueReminderCount: 1,
                 dueCardCount: 1,
                 showsConfirmation: false,
-                unlockedOutfits: ["none", "scarf"],
+                unlockedOutfits: ["none", "bell"],
                 isCatAnimated: false,
                 isFeeding: false,
                 showsLevelUp: false,
@@ -64,7 +64,7 @@ final class MewmewSnapshotTests: XCTestCase {
         )
     }
 
-    func testCatHomeWithScarf() {
+    func testCatHomeWithBell() {
         assertLightAndDark(
             makeCatHome(
                 status: CatStatus(
@@ -72,18 +72,18 @@ final class MewmewSnapshotTests: XCTestCase {
                     xp: 56,
                     fish: 1,
                     mood: "happy",
-                    outfit: "scarf"
+                    outfit: "bell"
                 )
             ),
-            named: "cat-home-scarf"
+            named: "cat-home-bell"
         )
     }
 
     func testOutfitPickerShowsLockedOutfit() {
         assertLightAndDark(
             OutfitPickerSheet(
-                selectedOutfit: "scarf",
-                unlockedOutfits: ["none", "scarf"],
+                selectedOutfit: "bell",
+                unlockedOutfits: ["none", "bell"],
                 onSelect: { _ in },
                 onLockedTap: { _ in }
             ),
@@ -334,7 +334,7 @@ final class MewmewSnapshotTests: XCTestCase {
             dueReminderCount: 1,
             dueCardCount: 1,
             showsConfirmation: false,
-            unlockedOutfits: ["none", "scarf"],
+            unlockedOutfits: ["none", "bell"],
             isCatAnimated: false,
             isFeeding: false,
             showsLevelUp: false,

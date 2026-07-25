@@ -127,8 +127,8 @@ struct CatView: View {
     @ViewBuilder
     private var outfitLayer: some View {
         switch outfit {
-        case "scarf":
-            scarf
+        case "bell":
+            bellCollar
         case "glasses":
             glasses
         default:
@@ -136,13 +136,31 @@ struct CatView: View {
         }
     }
 
-    private var scarf: some View {
-        // One path rather than a bar plus a stick: two uniform-width capsules
-        // read as a cane, not as cloth. The hanging end widens as it falls.
-        ScarfShape()
-            .fill(Color.white)
-            .frame(width: 120, height: 72)
-            .offset(y: 67)
+    private var bellCollar: some View {
+        // A collar reads from its silhouette — a thin line and a round bell —
+        // rather than from material. Three attempts at a cloth scarf all came
+        // out looking like a tool, because flat geometry cannot say "soft".
+        ZStack {
+            Capsule()
+                .fill(Color.white)
+                .frame(width: 104, height: 9)
+
+            ZStack {
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 26, height: 26)
+                Circle()
+                    .fill(Theme.accent)
+                    .frame(width: 7, height: 7)
+                    .offset(y: 3)
+                Capsule()
+                    .fill(Theme.accent)
+                    .frame(width: 3, height: 9)
+                    .offset(y: 6)
+            }
+            .offset(y: 15)
+        }
+        .offset(y: 44)
     }
 
     private var glasses: some View {
@@ -189,8 +207,8 @@ struct CatView: View {
         }
 
         switch outfit {
-        case "scarf":
-            return "\(moodDescription),戴着小围巾"
+        case "bell":
+            return "\(moodDescription),戴着小铃铛"
         case "glasses":
             return "\(moodDescription),戴着圆眼镜"
         default:
@@ -221,32 +239,6 @@ struct CatView: View {
                 isBlinking = false
             }
         }
-    }
-}
-
-private struct ScarfShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let w = rect.width
-        let h = rect.height
-        var path = Path()
-
-        // The band around the neck.
-        path.addRoundedRect(
-            in: CGRect(x: w * 0.05, y: 0, width: w * 0.90, height: h * 0.25),
-            cornerSize: CGSize(width: h * 0.125, height: h * 0.125)
-        )
-
-        // The loose end, tucked under the band and flaring outward as it hangs.
-        path.move(to: CGPoint(x: w * 0.60, y: h * 0.11))
-        path.addLine(to: CGPoint(x: w * 0.77, y: h * 0.11))
-        path.addLine(to: CGPoint(x: w * 0.83, y: h * 0.72))
-        path.addQuadCurve(
-            to: CGPoint(x: w * 0.63, y: h * 0.78),
-            control: CGPoint(x: w * 0.74, y: h * 0.84)
-        )
-        path.closeSubpath()
-
-        return path
     }
 }
 

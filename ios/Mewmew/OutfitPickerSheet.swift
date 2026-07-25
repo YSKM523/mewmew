@@ -120,7 +120,7 @@ private struct CatOutfitOption: Identifiable {
 
     static let all = [
         CatOutfitOption(id: "none", name: "原样", requiredLevel: 1),
-        CatOutfitOption(id: "scarf", name: "小围巾", requiredLevel: 2),
+        CatOutfitOption(id: "bell", name: "小铃铛", requiredLevel: 2),
         CatOutfitOption(id: "glasses", name: "圆眼镜", requiredLevel: 4),
     ]
 }

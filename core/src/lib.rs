@@ -630,14 +630,14 @@ fn mood_at(last_interaction_at: Option<i64>, now: i64) -> &'static str {
 fn outfit_required_level(outfit: &str) -> Option<i64> {
     match outfit {
         "none" => Some(1),
-        "scarf" => Some(2),
+        "bell" => Some(2),
         "glasses" => Some(4),
         _ => None,
     }
 }
 
 fn outfits_for_level(level: i64) -> Vec<&'static str> {
-    ["none", "scarf", "glasses"]
+    ["none", "bell", "glasses"]
         .into_iter()
         .filter(|outfit| {
             outfit_required_level(outfit).is_some_and(|required_level| level >= required_level)

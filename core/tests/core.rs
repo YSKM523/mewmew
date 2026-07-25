@@ -1333,7 +1333,7 @@ fn outfits_require_their_level_and_can_be_set_after_unlocking() {
         vec!["none".to_owned()]
     );
     assert!(matches!(
-        core.set_outfit("scarf".to_owned(), 100),
+        core.set_outfit("bell".to_owned(), 100),
         Err(CoreError::Invalid(_))
     ));
     assert!(matches!(
@@ -1348,12 +1348,12 @@ fn outfits_require_their_level_and_can_be_set_after_unlocking() {
     assert_eq!(
         core.unlocked_outfits()
             .expect("level two outfits should load"),
-        vec!["none".to_owned(), "scarf".to_owned()]
+        vec!["none".to_owned(), "bell".to_owned()]
     );
     let dressed = core
-        .set_outfit("scarf".to_owned(), 200)
-        .expect("newly unlocked scarf should be settable");
-    assert_eq!(dressed.outfit, "scarf");
+        .set_outfit("bell".to_owned(), 200)
+        .expect("newly unlocked bell should be settable");
+    assert_eq!(dressed.outfit, "bell");
     assert_eq!(dressed.mood, "happy");
     assert_eq!(read_cat_cache(&db).3, Some(200));
 
@@ -1366,7 +1366,7 @@ fn outfits_require_their_level_and_can_be_set_after_unlocking() {
     assert_eq!(
         core.unlocked_outfits()
             .expect("level four outfits should load"),
-        vec!["none".to_owned(), "scarf".to_owned(), "glasses".to_owned()]
+        vec!["none".to_owned(), "bell".to_owned(), "glasses".to_owned()]
     );
     assert_eq!(
         core.set_outfit("glasses".to_owned(), 300)
@@ -1383,7 +1383,7 @@ fn legacy_cat_status_keeps_stored_mood_but_repairs_level_from_xp() {
     update_cat(
         &db,
         "UPDATE cat
-         SET xp = 30, level = 1, mood = 'content', outfit = 'scarf',
+         SET xp = 30, level = 1, mood = 'content', outfit = 'bell',
              last_interaction_at = 1
          WHERE id = 1;",
     );
@@ -1392,7 +1392,7 @@ fn legacy_cat_status_keeps_stored_mood_but_repairs_level_from_xp() {
 
     assert_eq!(status.level, 2);
     assert_eq!(status.mood, "content");
-    assert_eq!(status.outfit, "scarf");
+    assert_eq!(status.outfit, "bell");
     assert_eq!(read_cat_cache(&db).0, 2);
 }
 
