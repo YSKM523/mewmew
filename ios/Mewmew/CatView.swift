@@ -137,20 +137,12 @@ struct CatView: View {
     }
 
     private var scarf: some View {
-        ZStack {
-            // Hanging end first, so the band overlaps its top and the two
-            // read as one piece of cloth rather than a cross.
-            Capsule()
-                .fill(Color.white)
-                .frame(width: 15, height: 44)
-                .rotationEffect(.degrees(-13))
-                .offset(x: 30, y: 22)
-
-            Capsule()
-                .fill(Color.white)
-                .frame(width: 108, height: 18)
-        }
-        .offset(y: 40)
+        // One path rather than a bar plus a stick: two uniform-width capsules
+        // read as a cane, not as cloth. The hanging end widens as it falls.
+        ScarfShape()
+            .fill(Color.white)
+            .frame(width: 120, height: 72)
+            .offset(y: 67)
     }
 
     private var glasses: some View {
@@ -229,6 +221,32 @@ struct CatView: View {
                 isBlinking = false
             }
         }
+    }
+}
+
+private struct ScarfShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let w = rect.width
+        let h = rect.height
+        var path = Path()
+
+        // The band around the neck.
+        path.addRoundedRect(
+            in: CGRect(x: w * 0.05, y: 0, width: w * 0.90, height: h * 0.25),
+            cornerSize: CGSize(width: h * 0.125, height: h * 0.125)
+        )
+
+        // The loose end, tucked under the band and flaring outward as it hangs.
+        path.move(to: CGPoint(x: w * 0.60, y: h * 0.11))
+        path.addLine(to: CGPoint(x: w * 0.77, y: h * 0.11))
+        path.addLine(to: CGPoint(x: w * 0.83, y: h * 0.72))
+        path.addQuadCurve(
+            to: CGPoint(x: w * 0.63, y: h * 0.78),
+            control: CGPoint(x: w * 0.74, y: h * 0.84)
+        )
+        path.closeSubpath()
+
+        return path
     }
 }
 
