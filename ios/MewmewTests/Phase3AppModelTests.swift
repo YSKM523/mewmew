@@ -235,7 +235,19 @@ private actor FakeCoreClient: CoreClientProtocol {
         memories.removeAll { $0.id == id }
     }
 
-    func catStatus() async throws -> CatStatus {
+    func catStatusAt(now: Int64) async throws -> CatStatus {
+        TestFixtures.catStatus
+    }
+
+    func feedCat(now: Int64) async throws -> CatStatus {
+        TestFixtures.catStatus
+    }
+
+    func unlockedOutfits() async throws -> [String] {
+        ["none"]
+    }
+
+    func setOutfit(outfit: String, now: Int64) async throws -> CatStatus {
         TestFixtures.catStatus
     }
 

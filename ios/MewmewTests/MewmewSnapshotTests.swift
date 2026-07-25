@@ -6,18 +6,88 @@ import XCTest
 
 @MainActor
 final class MewmewSnapshotTests: XCTestCase {
-    func testCatHome() {
+    func testCatHomeHappy() {
         assertLightAndDark(
             CatHomeView(
-                status: TestFixtures.catStatus,
+                status: CatStatus(
+                    level: 2,
+                    xp: 46,
+                    fish: 3,
+                    mood: "happy",
+                    outfit: "none"
+                ),
                 dueReminderCount: 1,
                 dueCardCount: 1,
                 showsConfirmation: false,
+                unlockedOutfits: ["none", "scarf"],
+                isCatAnimated: false,
+                isFeeding: false,
+                showsLevelUp: false,
                 onCapture: {},
                 onSelectToday: { _ in },
-                onReview: {}
+                onReview: {},
+                onFeed: {},
+                onSelectOutfit: { _ in },
+                onLockedOutfit: { _ in }
             ),
-            named: "cat-home"
+            named: "cat-home-happy"
+        )
+    }
+
+    func testCatHomeContent() {
+        assertLightAndDark(
+            makeCatHome(
+                status: CatStatus(
+                    level: 1,
+                    xp: 29,
+                    fish: 0,
+                    mood: "content",
+                    outfit: "none"
+                )
+            ),
+            named: "cat-home-content"
+        )
+    }
+
+    func testCatHomeSleepy() {
+        assertLightAndDark(
+            makeCatHome(
+                status: CatStatus(
+                    level: 4,
+                    xp: 220,
+                    fish: 2,
+                    mood: "sleepy",
+                    outfit: "none"
+                )
+            ),
+            named: "cat-home-sleepy"
+        )
+    }
+
+    func testCatHomeWithScarf() {
+        assertLightAndDark(
+            makeCatHome(
+                status: CatStatus(
+                    level: 2,
+                    xp: 56,
+                    fish: 1,
+                    mood: "happy",
+                    outfit: "scarf"
+                )
+            ),
+            named: "cat-home-scarf"
+        )
+    }
+
+    func testOutfitPickerShowsLockedOutfit() {
+        assertLightAndDark(
+            OutfitPickerSheet(
+                selectedOutfit: "scarf",
+                unlockedOutfits: ["none", "scarf"],
+                onSelect: { _ in },
+                onLockedTap: { _ in }
+            ),
+            named: "outfit-picker"
         )
     }
 
@@ -256,6 +326,25 @@ final class MewmewSnapshotTests: XCTestCase {
                 line: line
             )
         }
+    }
+
+    private func makeCatHome(status: CatStatus) -> CatHomeView {
+        CatHomeView(
+            status: status,
+            dueReminderCount: 1,
+            dueCardCount: 1,
+            showsConfirmation: false,
+            unlockedOutfits: ["none", "scarf"],
+            isCatAnimated: false,
+            isFeeding: false,
+            showsLevelUp: false,
+            onCapture: {},
+            onSelectToday: { _ in },
+            onReview: {},
+            onFeed: {},
+            onSelectOutfit: { _ in },
+            onLockedOutfit: { _ in }
+        )
     }
 }
 

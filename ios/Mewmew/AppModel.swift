@@ -7,7 +7,16 @@ final class AppModel: ObservableObject, NotificationSchedulerDelegate {
     @Published var selectedTab: AppTab = .cat
     @Published private(set) var memoryFilter: MemoryFilter = .all
     @Published var memories: [Memory] = []
-    @Published var catStatus = CatStatus(level: 1, xp: 0, fish: 0, mood: "content")
+    @Published var catStatus = CatStatus(
+        level: 1,
+        xp: 0,
+        fish: 0,
+        mood: "content",
+        outfit: "none"
+    )
+    @Published private(set) var unlockedOutfits: Set<String> = ["none"]
+    @Published private(set) var isFeedingCat = false
+    @Published private(set) var showsLevelUp = false
     @Published var isCapturePresented = false
     @Published var showsConfirmation = false
     @Published var toastMessage: String?
@@ -113,7 +122,8 @@ final class AppModel: ObservableObject, NotificationSchedulerDelegate {
             } else {
                 memories = allMemories
             }
-            catStatus = try await client.catStatus()
+            catStatus = try await client.catStatusAt(now: currentTimestamp())
+            unlockedOutfits = Set(try await client.unlockedOutfits())
             dueCardCount = Int(
                 try await client.dueCardCount(now: currentTimestamp())
             )
@@ -132,6 +142,48 @@ final class AppModel: ObservableObject, NotificationSchedulerDelegate {
             client: client,
             currentTimestamp: currentTimestamp
         )
+    }
+
+    func feedCat() async {
+        guard !isFeedingCat else { return }
+        guard catStatus.fish > 0 else {
+            errorMessage = "没有小鱼干了,完成提醒或复习就能得到"
+            return
+        }
+
+        let previousLevel = catStatus.level
+        isFeedingCat = true
+        defer { isFeedingCat = false }
+
+        do {
+            let now = currentTimestamp()
+            catStatus = try await client.feedCat(now: now)
+            catStatus = try await client.catStatusAt(now: now)
+            unlockedOutfits = Set(try await client.unlockedOutfits())
+
+            if catStatus.level > previousLevel {
+                showLevelUpFeedback()
+            }
+
+            try? await Task.sleep(nanoseconds: 450_000_000)
+        } catch {
+            errorMessage = friendlyCatErrorMessage(for: error)
+        }
+    }
+
+    func setOutfit(_ outfit: String) async {
+        do {
+            let now = currentTimestamp()
+            catStatus = try await client.setOutfit(outfit: outfit, now: now)
+            catStatus = try await client.catStatusAt(now: now)
+            unlockedOutfits = Set(try await client.unlockedOutfits())
+        } catch {
+            errorMessage = friendlyCatErrorMessage(for: error)
+        }
+    }
+
+    func showLockedOutfitMessage(requiredLevel: Int64) {
+        errorMessage = "长到 Lv.\(requiredLevel) 就能穿上啦"
     }
 
     func reviewSessionDidDismiss() async {
@@ -436,6 +488,29 @@ final class AppModel: ObservableObject, NotificationSchedulerDelegate {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             self?.toastMessage = nil
         }
+    }
+
+    private func showLevelUpFeedback() {
+        showsLevelUp = true
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_600_000_000)
+            self?.showsLevelUp = false
+        }
+    }
+
+    private func friendlyCatErrorMessage(for error: Error) -> String {
+        if let coreError = error as? CoreError {
+            switch coreError {
+            case let .Invalid(message):
+                if message == "没有小鱼干了" {
+                    return "没有小鱼干了,完成提醒或复习就能得到"
+                }
+                return message
+            case .Db(_), .NotFound:
+                break
+            }
+        }
+        return "猫现在有点忙,稍后再试试"
     }
 
     private func upsertInMemory(_ memory: Memory) {

@@ -5,16 +5,25 @@ struct CatHomeView: View {
     let dueReminderCount: Int
     let dueCardCount: Int
     let showsConfirmation: Bool
+    let unlockedOutfits: Set<String>
+    let isCatAnimated: Bool
+    let isFeeding: Bool
+    let showsLevelUp: Bool
     let onCapture: () -> Void
     let onSelectToday: (MemoryFilter) -> Void
     let onReview: () -> Void
+    let onFeed: () -> Void
+    let onSelectOutfit: (String) -> Void
+    let onLockedOutfit: (Int64) -> Void
+
+    @State private var isOutfitPickerPresented = false
 
     var body: some View {
         GeometryReader { proxy in
             ScrollView {
                 VStack(spacing: 24) {
                     catStage
-                        .frame(minHeight: max(280, proxy.size.height * 0.45))
+                        .frame(minHeight: max(340, proxy.size.height * 0.5))
 
                     Button(action: onCapture) {
                         Text("记一下…")
@@ -36,16 +45,63 @@ struct CatHomeView: View {
             }
             .background(Theme.background)
         }
+        .sheet(isPresented: $isOutfitPickerPresented) {
+            OutfitPickerSheet(
+                selectedOutfit: status.outfit,
+                unlockedOutfits: unlockedOutfits,
+                onSelect: onSelectOutfit,
+                onLockedTap: onLockedOutfit
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
     }
 
     private var catStage: some View {
-        VStack(spacing: 18) {
-            Spacer(minLength: 16)
+        VStack(spacing: 12) {
+            HStack {
+                Spacer()
+                Button {
+                    isOutfitPickerPresented = true
+                } label: {
+                    Label("装扮", systemImage: "tshirt")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.primaryText)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 8)
+                        .background(Theme.surface)
+                        .clipShape(
+                            RoundedRectangle(
+                                cornerRadius: Theme.cornerRadius
+                            )
+                        )
+                        .overlay {
+                            RoundedRectangle(
+                                cornerRadius: Theme.cornerRadius
+                            )
+                            .stroke(
+                                Theme.border,
+                                lineWidth: Theme.borderWidth
+                            )
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("outfit-button")
+            }
 
-            Image(systemName: "cat.fill")
-                .font(.system(size: 132, weight: .regular))
-                .foregroundStyle(Theme.accent)
-                .accessibilityLabel("猫")
+            CatView(
+                mood: status.mood,
+                outfit: status.outfit,
+                isAnimated: isCatAnimated
+            )
+            .frame(width: 240, height: 240)
+            .scaleEffect(isFeeding ? 1.06 : 1)
+            .offset(y: isFeeding ? 5 : 0)
+            .animation(
+                .spring(response: 0.3, dampingFraction: 0.68),
+                value: isFeeding
+            )
+            .accessibilityIdentifier("cat-view")
                 .overlay(alignment: .topTrailing) {
                     if showsConfirmation {
                         Text("记住啦!")
@@ -64,13 +120,109 @@ struct CatHomeView: View {
                     }
                 }
 
-            Text("小鱼干 ×\(status.fish) · Lv.\(status.level)")
+            Text(moodMessage)
                 .font(.body)
-                .foregroundStyle(Theme.secondaryText)
+                .foregroundStyle(Theme.primaryText)
 
-            Spacer(minLength: 16)
+            HStack(spacing: 12) {
+                Text("🐟 ×\(status.fish)")
+                    .font(.body)
+                    .foregroundStyle(Theme.secondaryText)
+                    .accessibilityLabel("小鱼干 \(status.fish) 条")
+
+                if status.fish > 0 {
+                    Button("喂猫", action: onFeed)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Theme.accent)
+                        .clipShape(
+                            RoundedRectangle(
+                                cornerRadius: Theme.cornerRadius
+                            )
+                        )
+                        .buttonStyle(.plain)
+                        .disabled(isFeeding)
+                        .opacity(isFeeding ? 0.55 : 1)
+                        .accessibilityIdentifier("feed-cat-button")
+                }
+            }
+
+            levelProgress
+                .frame(maxWidth: 280)
+
+            Spacer(minLength: 6)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private var levelProgress: some View {
+        let progress = CatLevelProgress(xp: status.xp)
+        let nextThreshold = CatLevelProgress.threshold(
+            for: progress.level + 1
+        )
+
+        return VStack(spacing: 7) {
+            HStack(spacing: 8) {
+                Text("Lv.\(status.level)")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.primaryText)
+                    .scaleEffect(showsLevelUp ? 1.18 : 1)
+                    .animation(
+                        .spring(response: 0.3, dampingFraction: 0.58),
+                        value: showsLevelUp
+                    )
+
+                if showsLevelUp {
+                    Text("长大啦!")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                        .transition(.scale.combined(with: .opacity))
+                }
+
+                Spacer()
+
+                Text("\(status.xp) / \(nextThreshold) XP")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Theme.border)
+                    Capsule()
+                        .fill(Theme.accent)
+                        .frame(
+                            width: proxy.size.width
+                                * CGFloat(progress.fraction)
+                        )
+                }
+            }
+            .frame(height: 3)
+            .animation(
+                .easeOut(duration: 0.45),
+                value: status.xp
+            )
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("等级进度")
+            .accessibilityValue(
+                "\(Int((progress.fraction * 100).rounded()))%"
+            )
+        }
+        .animation(.easeOut(duration: 0.2), value: showsLevelUp)
+    }
+
+    private var moodMessage: String {
+        switch status.mood {
+        case "happy":
+            return "猫正精神地陪着你"
+        case "sleepy":
+            return "猫在窝里打盹"
+        default:
+            return "猫安静地待在你身边"
+        }
     }
 
     private var todaySection: some View {
@@ -132,7 +284,7 @@ private struct TodaySummaryCard: View {
         .buttonStyle(.plain)
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.55)
-        .accessibilityLabel("\(title)，\(count)")
+        .accessibilityLabel("\(title),\(count)")
         .accessibilityHint(
             Text(isEnabled ? "打开" : "暂无可复习卡片")
         )

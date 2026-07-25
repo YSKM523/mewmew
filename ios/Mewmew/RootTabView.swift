@@ -11,9 +11,24 @@ struct RootTabView: View {
                 dueReminderCount: model.dueReminderCount,
                 dueCardCount: model.dueCardCount,
                 showsConfirmation: model.showsConfirmation,
+                unlockedOutfits: model.unlockedOutfits,
+                isCatAnimated: true,
+                isFeeding: model.isFeedingCat,
+                showsLevelUp: model.showsLevelUp,
                 onCapture: model.openCapture,
                 onSelectToday: model.selectToday,
-                onReview: model.openReviewSession
+                onReview: model.openReviewSession,
+                onFeed: {
+                    Task { @MainActor in
+                        await model.feedCat()
+                    }
+                },
+                onSelectOutfit: { outfit in
+                    Task { @MainActor in
+                        await model.setOutfit(outfit)
+                    }
+                },
+                onLockedOutfit: model.showLockedOutfitMessage
             )
             .tabItem {
                 Label("猫", systemImage: "cat.fill")

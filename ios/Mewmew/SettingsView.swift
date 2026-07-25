@@ -57,7 +57,7 @@ struct SettingsView: View {
                 } header: {
                     Text("调试")
                 } footer: {
-                    Text("Phase 1 暂不执行清空操作。")
+                    Text("调试用,暂不执行清空操作")
                 }
                 .listRowBackground(Theme.surface)
 #endif

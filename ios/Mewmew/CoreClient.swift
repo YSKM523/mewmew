@@ -32,7 +32,10 @@ protocol CoreClientProtocol: ReviewServing, Sendable {
         now: Int64
     ) async throws -> Memory
     func deleteMemory(id: String, now: Int64) async throws
-    func catStatus() async throws -> CatStatus
+    func catStatusAt(now: Int64) async throws -> CatStatus
+    func feedCat(now: Int64) async throws -> CatStatus
+    func unlockedOutfits() async throws -> [String]
+    func setOutfit(outfit: String, now: Int64) async throws -> CatStatus
     func search(queryText: String) async throws -> [Memory]
     func searchForRecall(query: String, limit: UInt32) async throws -> [Memory]
 }
@@ -134,8 +137,20 @@ actor CoreClient: CoreClientProtocol {
         try instance().deleteMemory(id: id, now: now)
     }
 
-    func catStatus() async throws -> CatStatus {
-        try instance().catStatus()
+    func catStatusAt(now: Int64) async throws -> CatStatus {
+        try instance().catStatusAt(now: now)
+    }
+
+    func feedCat(now: Int64) async throws -> CatStatus {
+        try instance().feedCat(now: now)
+    }
+
+    func unlockedOutfits() async throws -> [String] {
+        try instance().unlockedOutfits()
+    }
+
+    func setOutfit(outfit: String, now: Int64) async throws -> CatStatus {
+        try instance().setOutfit(outfit: outfit, now: now)
     }
 
     func search(queryText: String) async throws -> [Memory] {

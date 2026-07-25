@@ -432,8 +432,20 @@ private actor FakeNotificationCore: CoreClientProtocol {
 
     func deleteMemory(id: String, now: Int64) async throws {}
 
-    func catStatus() async throws -> CatStatus {
+    func catStatusAt(now: Int64) async throws -> CatStatus {
         TestFixtures.catStatus
+    }
+
+    func feedCat(now: Int64) async throws -> CatStatus {
+        throw Phase4TestError.unexpectedCall
+    }
+
+    func unlockedOutfits() async throws -> [String] {
+        ["none"]
+    }
+
+    func setOutfit(outfit: String, now: Int64) async throws -> CatStatus {
+        throw Phase4TestError.unexpectedCall
     }
 
     func search(queryText: String) async throws -> [Memory] {

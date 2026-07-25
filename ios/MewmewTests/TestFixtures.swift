@@ -56,7 +56,13 @@ enum TestFixtures {
         updatedAt: now - 1_800
     )
 
-    static let catStatus = CatStatus(level: 1, xp: 0, fish: 3, mood: "content")
+    static let catStatus = CatStatus(
+        level: 1,
+        xp: 0,
+        fish: 3,
+        mood: "content",
+        outfit: "none"
+    )
 
     static let reviewCard = Memory(
         id: "review-card-1",

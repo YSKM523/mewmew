@@ -34,11 +34,11 @@ final class SpeechCapture: ObservableObject, SpeechCapturing {
         let microphoneAllowed = await requestMicrophonePermission()
 
         guard speechStatus == .authorized else {
-            errorMessage = "请在系统设置中允许语音识别。"
+            errorMessage = "请在系统设置中允许语音识别"
             return false
         }
         guard microphoneAllowed else {
-            errorMessage = "请在系统设置中允许使用麦克风。"
+            errorMessage = "请在系统设置中允许使用麦克风"
             return false
         }
 
@@ -49,7 +49,7 @@ final class SpeechCapture: ObservableObject, SpeechCapturing {
     func start() {
         guard !isRecording else { return }
         guard let speechRecognizer, speechRecognizer.isAvailable else {
-            errorMessage = "语音识别暂时不可用，请稍后再试。"
+            errorMessage = "语音识别暂时不可用,请稍后再试"
             return
         }
 
@@ -178,6 +178,6 @@ private enum SpeechCaptureError: LocalizedError {
     case audioInputUnavailable
 
     var errorDescription: String? {
-        "没有可用的麦克风输入。"
+        "没有可用的麦克风输入"
     }
 }

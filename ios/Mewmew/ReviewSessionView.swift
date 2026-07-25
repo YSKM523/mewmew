@@ -57,12 +57,12 @@ final class ReviewSessionModel: ObservableObject, Identifiable {
 
     var catReaction: String {
         if earnedFishCount == 0 {
-            return "猫蹭蹭你：忘了也没关系，下次再来。"
+            return "猫蹭蹭你:忘了也没关系,下次再来"
         }
         if earnedFishCount == reviewedCount {
-            return "猫满意地眯起眼，把小鱼干收好了。"
+            return "猫满意地眯起眼,把小鱼干收好了"
         }
-        return "猫甩甩尾巴：今天也记住了不少。"
+        return "猫甩甩尾巴:今天也记住了不少"
     }
 
     func load() async {
