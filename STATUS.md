@@ -15,7 +15,8 @@
 - ✅ **Phase 0.5**:TestFlight 全链路通。fastlane `beta` lane(API key → match → build_app → upload)+ macos-26 runner。**build 1 已上传,Apple 侧 VALID**。App 记录与 Bundle ID 已建(app id 6794423533)。
 - ✅ **Phase 2**:core `reclassify_memory` + Worker `/v1/parse` + iOS 语音 capture。**Worker 线上 https://mewmew-api.pp-account.workers.dev,生产实测 6/6 分类正确、时间落在调用方时区**。
 - ✅ **Phase 3**:提醒 + 召回闭环。core `pending_reminders`/`snooze_reminder`/中文 FTS `search_for_recall`;Worker `/v1/recall` **已上线实测**;iOS 通知调度(全量重放,上限 56)+ 猫口吻通知(「记下了」/「等会儿」)+ 问猫 UI。
-- ⏳ **Phase 4 起**:FSRS 间隔重复 + 考问会话,未开工。
+- ✅ **Phase 4**:间隔重复闭环。core FSRS(`rs-fsrs` 1.2.1,migration v3,`due_cards`/`review_card`/`next_card_due_at`)+ iOS 考问会话(两步揭晓、三档评分)+ 复习通知(安静时段顺延)。
+- ⏳ **Phase 5 起**:猫养成(状态机/等级/装扮/动画),未开工。
 
 ## 线上资源
 
@@ -43,3 +44,6 @@ docs/core-spec.md · docs/ui-spec.md · docs/ios-ci-spec.md · docs/worker-spec.
 - **OR 兜底会有假阳性**(飞机→咖啡机),这是刻意的:检索多召回、模型守住不编造(已实测)。别当 bug 去"修"。
 - iOS 本地通知 pending 上限 64,超出静默丢弃 → 只排 56 条并在设置页显示实际排期数。
 - **Swift 并发隔离/协议遵循只能靠 CI 兜**(Linux 无编译器):@MainActor 类型不能直接当默认参数、实现了 delegate 方法≠声明了遵循。
+- **`rs_fsrs::Card::new()` 读系统时钟,禁用**——手工构造 Card,时间由调用方传。确定性有测试守着(同输入必须同输出)。
+- FSRS 间隔实测:新卡答 Good 后 10 分钟,再 4d→15d→48d→136d→351d。测试断言"递增"而非写死天数(参数升级会变)。
+- **测试里别用裸下标**(`requests[0]`):断言失败会变成测试进程崩溃,带走同进程其他测试并伪装成"快照找不到参考",极难定位。用 `XCTUnwrap`。
