@@ -3,9 +3,14 @@ import SwiftUI
 struct MemoriesView: View {
     let memories: [Memory]
     @Binding var filter: MemoryFilter
+    @Binding var searchText: String
+    let recallPresentation: RecallPresentation?
+    let isRecalling: Bool
+    let focusedMemoryID: String?
     let now: Int64
     let onComplete: (Memory) -> Void
     let onDelete: (Memory) -> Void
+    let onSubmitRecall: () -> Void
     let onEmptyCapture: () -> Void
 
     private var filteredMemories: [Memory] {
@@ -13,9 +18,15 @@ struct MemoriesView: View {
         return memories.filter { $0.kind == kind }
     }
 
+    private var hasSearchText: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                recallSearchField
+
                 Picker("记忆类型", selection: $filter) {
                     ForEach(MemoryFilter.allCases) { item in
                         Text(item.rawValue).tag(item)
@@ -23,12 +34,14 @@ struct MemoriesView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.bottom, 12)
 
-                if filteredMemories.isEmpty {
-                    EmptyMemoryView(onCapture: onEmptyCapture)
-                } else {
+                if shouldShowList {
                     memoryList
+                } else if hasSearchText {
+                    SearchEmptyView()
+                } else {
+                    EmptyMemoryView(onCapture: onEmptyCapture)
                 }
             }
             .background(Theme.background)
@@ -36,44 +49,197 @@ struct MemoriesView: View {
         }
     }
 
-    private var memoryList: some View {
-        List(filteredMemories) { memory in
-            MemoryRow(memory: memory, now: now)
-                .listRowInsets(
-                    EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16)
-                )
-                .listRowSeparator(.hidden)
-                .listRowBackground(Theme.background)
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button(role: .destructive) {
-                        onDelete(memory)
-                    } label: {
-                        Label("删除", systemImage: "trash")
-                    }
-                    .tint(Theme.overdue)
+    private var shouldShowList: Bool {
+        !filteredMemories.isEmpty || recallPresentation != nil || isRecalling
+    }
 
-                    if memory.kind == .reminder, memory.completedAt == nil {
-                        Button {
-                            onComplete(memory)
-                        } label: {
-                            Label("完成", systemImage: "checkmark")
-                        }
-                        .tint(Theme.completed)
+    private var recallSearchField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(Theme.secondaryText)
+                .accessibilityHidden(true)
+
+            TextField("问猫:护照放哪了?", text: $searchText)
+                .font(.body)
+                .foregroundStyle(Theme.primaryText)
+                .submitLabel(.search)
+                .onSubmit(onSubmitRecall)
+                .accessibilityIdentifier("recall-search-field")
+
+            if hasSearchText {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("清空搜索")
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Theme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.cornerRadius)
+                .stroke(Theme.border, lineWidth: Theme.borderWidth)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+    }
+
+    private var memoryList: some View {
+        ScrollViewReader { proxy in
+            List {
+                if isRecalling {
+                    RecallBubble(
+                        message: "猫在翻记忆…",
+                        isLoading: true,
+                        isFallback: false
+                    )
+                    .listRowInsets(
+                        EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16)
+                    )
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Theme.background)
+                } else if let recallPresentation {
+                    RecallBubble(
+                        message: recallPresentation.message,
+                        isLoading: false,
+                        isFallback: recallPresentation.isFallback
+                    )
+                    .listRowInsets(
+                        EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16)
+                    )
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Theme.background)
+
+                    if !filteredMemories.isEmpty {
+                        Text(recallPresentation.listHeading)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.secondaryText)
+                        .textCase(nil)
+                        .listRowInsets(
+                            EdgeInsets(
+                                top: 10,
+                                leading: 18,
+                                bottom: 2,
+                                trailing: 16
+                            )
+                        )
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Theme.background)
                     }
                 }
+
+                ForEach(filteredMemories) { memory in
+                    MemoryRow(
+                        memory: memory,
+                        now: now,
+                        isFocused: focusedMemoryID == memory.id,
+                        showsRawText: recallPresentation != nil
+                    )
+                    .id(memory.id)
+                    .listRowInsets(
+                        EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16)
+                    )
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Theme.background)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            onDelete(memory)
+                        } label: {
+                            Label("删除", systemImage: "trash")
+                        }
+                        .tint(Theme.overdue)
+
+                        if memory.kind == .reminder, memory.completedAt == nil {
+                            Button {
+                                onComplete(memory)
+                            } label: {
+                                Label("完成", systemImage: "checkmark")
+                            }
+                            .tint(Theme.completed)
+                        }
+                    }
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
+            .onAppear {
+                scrollToFocusedMemory(using: proxy)
+            }
+            .onChange(of: focusedMemoryID) { _, _ in
+                scrollToFocusedMemory(using: proxy)
+            }
+            .onChange(of: filteredMemories.map(\.id)) { _, _ in
+                scrollToFocusedMemory(using: proxy)
+            }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .background(Theme.background)
+    }
+
+    private func scrollToFocusedMemory(using proxy: ScrollViewProxy) {
+        guard let focusedMemoryID,
+            filteredMemories.contains(where: { $0.id == focusedMemoryID })
+        else {
+            return
+        }
+        proxy.scrollTo(focusedMemoryID, anchor: .center)
+    }
+}
+
+private struct RecallBubble: View {
+    let message: String
+    let isLoading: Bool
+    let isFallback: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "cat.fill")
+                .font(.title3)
+                .foregroundStyle(Theme.accent)
+                .accessibilityHidden(true)
+
+            HStack(spacing: 10) {
+                Text(message)
+                    .font(.body)
+                    .foregroundStyle(Theme.primaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if isLoading {
+                    ProgressView()
+                        .tint(Theme.accent)
+                }
+            }
+        }
+        .padding(16)
+        .background(Theme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.cornerRadius)
+                .stroke(Theme.border, lineWidth: Theme.borderWidth)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(
+            isFallback ? "recall-fallback-bubble" : "recall-answer-bubble"
+        )
     }
 }
 
 private struct MemoryRow: View {
     let memory: Memory
     let now: Int64
+    let isFocused: Bool
+    let showsRawText: Bool
 
     private var isOverdue: Bool {
-        guard memory.kind == .reminder, memory.completedAt == nil, let dueAt = memory.dueAt else {
+        guard memory.kind == .reminder,
+            memory.completedAt == nil,
+            let dueAt = memory.dueAt
+        else {
             return false
         }
         return dueAt < now
@@ -87,6 +253,13 @@ private struct MemoryRow: View {
                 .foregroundStyle(Theme.primaryText)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            if showsRawText, memory.rawText != memory.title {
+                Text(memory.rawText)
+                    .font(.body)
+                    .foregroundStyle(Theme.primaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             HStack(spacing: 6) {
                 Image(systemName: memory.kind.systemImage)
                 Text(memory.kind.title)
@@ -98,7 +271,9 @@ private struct MemoryRow: View {
                             .foregroundStyle(Theme.completed)
                     } else {
                         Text("\(isOverdue ? "已到期" : "到期") \(Self.dueText(dueAt))")
-                            .foregroundStyle(isOverdue ? Theme.overdue : Theme.secondaryText)
+                            .foregroundStyle(
+                                isOverdue ? Theme.overdue : Theme.secondaryText
+                            )
                     }
                 } else {
                     Text(Self.relativeText(from: memory.createdAt, to: now))
@@ -112,7 +287,10 @@ private struct MemoryRow: View {
         .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
         .overlay {
             RoundedRectangle(cornerRadius: Theme.cornerRadius)
-                .stroke(Theme.border, lineWidth: Theme.borderWidth)
+                .stroke(
+                    isFocused ? Theme.accent : Theme.border,
+                    lineWidth: Theme.borderWidth
+                )
         }
         .accessibilityElement(children: .combine)
     }
@@ -132,7 +310,9 @@ private struct MemoryRow: View {
     }
 
     private static func dueText(_ timestamp: Int64) -> String {
-        dueFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(timestamp)))
+        dueFormatter.string(
+            from: Date(timeIntervalSince1970: TimeInterval(timestamp))
+        )
     }
 
     private static let dueFormatter: DateFormatter = {
@@ -142,6 +322,28 @@ private struct MemoryRow: View {
         formatter.dateFormat = "M月d日 HH:mm"
         return formatter
     }()
+}
+
+private struct SearchEmptyView: View {
+    var body: some View {
+        VStack(spacing: 14) {
+            Spacer()
+
+            Image(systemName: "tray")
+                .font(.system(size: 48))
+                .foregroundStyle(Theme.secondaryText)
+                .accessibilityHidden(true)
+
+            Text("没有找到相关记忆")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Theme.primaryText)
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
+        .background(Theme.background)
+    }
 }
 
 private struct EmptyMemoryView: View {

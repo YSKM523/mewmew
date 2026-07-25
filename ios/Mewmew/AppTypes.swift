@@ -6,6 +6,35 @@ enum AppTab: Hashable {
     case profile
 }
 
+enum NotificationPermissionStatus: Equatable, Sendable {
+    case notDetermined
+    case denied
+    case authorized
+
+    var title: String {
+        switch self {
+        case .notDetermined:
+            "未询问"
+        case .denied:
+            "未授权"
+        case .authorized:
+            "已授权"
+        }
+    }
+}
+
+struct RecallPresentation: Equatable {
+    let message: String
+    /// What to list under the bubble. These are the cat's citations only when
+    /// `showsCitations` is set — when it declines to answer there are none, and
+    /// listing nothing would throw away the search the user just triggered.
+    let listedMemories: [Memory]
+    let isFallback: Bool
+    let showsCitations: Bool
+
+    var listHeading: String { showsCitations ? "引用的记忆" : "本地结果" }
+}
+
 enum MemoryFilter: String, CaseIterable, Identifiable {
     case all = "全部"
     case reminder = "提醒"

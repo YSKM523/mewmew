@@ -1,5 +1,13 @@
 import Foundation
 
+protocol ParseServing: Sendable {
+    func parse(
+        text: String,
+        timeZone: TimeZone,
+        now: Date
+    ) async -> ParseResult?
+}
+
 struct ParseResult: Decodable {
     let kind: ParseKind
     let title: String
@@ -35,7 +43,7 @@ enum ParseKind: String, Decodable {
     }
 }
 
-actor ParseClient {
+actor ParseClient: ParseServing {
     static let shared = ParseClient()
 
     private static let endpoint = URL(

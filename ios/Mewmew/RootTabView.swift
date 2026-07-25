@@ -20,14 +20,22 @@ struct RootTabView: View {
             .tag(AppTab.cat)
 
             MemoriesView(
-                memories: model.memories,
+                memories: model.displayedMemories,
                 filter: Binding(
                     get: { model.memoryFilter },
                     set: model.setMemoryFilter
                 ),
+                searchText: Binding(
+                    get: { model.searchText },
+                    set: model.setSearchText
+                ),
+                recallPresentation: model.recallPresentation,
+                isRecalling: model.isRecalling,
+                focusedMemoryID: model.focusedMemoryID,
                 now: Int64(Date().timeIntervalSince1970),
                 onComplete: model.complete,
                 onDelete: model.delete,
+                onSubmitRecall: model.submitRecall,
                 onEmptyCapture: {
                     model.selectedTab = .cat
                     model.openCapture()
@@ -40,7 +48,10 @@ struct RootTabView: View {
 
             SettingsView(
                 appVersion: Self.appVersion,
-                databasePath: CoreClient.defaultDatabasePath
+                databasePath: CoreClient.defaultDatabasePath,
+                scheduledReminderCount: model.scheduledReminderCount,
+                notificationPermission: model.notificationPermission,
+                onOpenNotificationSettings: model.openNotificationSettings
             )
             .tabItem {
                 Label("我", systemImage: "person.fill")
@@ -96,12 +107,14 @@ struct RootTabView: View {
     }
 
     private static var appVersion: String {
-        let version = Bundle.main.object(
+        let versionObject = Bundle.main.object(
             forInfoDictionaryKey: "CFBundleShortVersionString"
-        ) as? String ?? "1.0"
-        let build = Bundle.main.object(
+        )
+        let buildObject = Bundle.main.object(
             forInfoDictionaryKey: "CFBundleVersion"
-        ) as? String ?? "1"
+        )
+        let version = (versionObject as? String) ?? "1.0"
+        let build = (buildObject as? String) ?? "1"
         return "\(version) (\(build))"
     }
 }

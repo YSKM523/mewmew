@@ -1,8 +1,9 @@
 import Combine
 import Foundation
+import UIKit
 
 @MainActor
-final class AppModel: ObservableObject {
+final class AppModel: ObservableObject, NotificationSchedulerDelegate {
     @Published var selectedTab: AppTab = .cat
     @Published private(set) var memoryFilter: MemoryFilter = .all
     @Published var memories: [Memory] = []
@@ -11,17 +12,36 @@ final class AppModel: ObservableObject {
     @Published var showsConfirmation = false
     @Published var toastMessage: String?
     @Published var errorMessage: String?
+    @Published private(set) var searchText = ""
+    @Published private(set) var recallPresentation: RecallPresentation?
+    @Published private(set) var isRecalling = false
+    @Published var focusedMemoryID: String?
+    @Published private(set) var scheduledReminderCount = 0
+    @Published private(set) var notificationPermission =
+        NotificationPermissionStatus.notDetermined
 
-    private let client: CoreClient
-    private let parseClient: ParseClient
+    private static let notificationPromptedKey =
+        "hasRequestedReminderNotificationAuthorization"
+
+    private let client: CoreClientProtocol
+    private let parseClient: ParseServing
+    private let recallClient: RecallServing
+    private let notificationScheduler: NotificationScheduling
+    private let promptDefaults: UserDefaults
     private let currentTimestamp: () -> Int64
     private let currentDate: () -> Date
     private var hasStarted = false
     private var allMemories: [Memory] = []
+    private var searchResults: [Memory] = []
+    private var searchTask: Task<Void, Never>?
+    private var recallTask: Task<Void, Never>?
 
     init(
-        client: CoreClient = .shared,
-        parseClient: ParseClient = .shared,
+        client: CoreClientProtocol = CoreClient.shared,
+        parseClient: ParseServing = ParseClient.shared,
+        recallClient: RecallServing = RecallClient.shared,
+        notificationScheduler: NotificationScheduling? = nil,
+        promptDefaults: UserDefaults = .standard,
         currentTimestamp: @escaping () -> Int64 = {
             Int64(Date().timeIntervalSince1970)
         },
@@ -31,8 +51,35 @@ final class AppModel: ObservableObject {
     ) {
         self.client = client
         self.parseClient = parseClient
+        self.recallClient = recallClient
+        self.promptDefaults = promptDefaults
         self.currentTimestamp = currentTimestamp
         self.currentDate = currentDate
+
+        let scheduler = notificationScheduler ?? NotificationScheduler(
+            client: client,
+            currentTimestamp: currentTimestamp
+        )
+        self.notificationScheduler = scheduler
+
+        scheduler.delegate = self
+        scheduler.registerCategories()
+    }
+
+    var displayedMemories: [Memory] {
+        let source: [Memory]
+        if let recallPresentation {
+            source = recallPresentation.listedMemories
+        } else if searchText.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ).isEmpty {
+            source = memories
+        } else {
+            source = searchResults
+        }
+
+        guard let kind = memoryFilter.kind else { return source }
+        return source.filter { $0.kind == kind }
     }
 
     var dueReminderCount: Int {
@@ -52,6 +99,12 @@ final class AppModel: ObservableObject {
         guard !hasStarted else { return }
         hasStarted = true
         await refresh()
+        await syncNotifications()
+    }
+
+    func didBecomeActive() async {
+        await refresh()
+        await syncNotifications()
     }
 
     func refresh() async {
@@ -72,6 +125,13 @@ final class AppModel: ObservableObject {
         isCapturePresented = true
     }
 
+    func openNotificationSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else {
+            return
+        }
+        UIApplication.shared.open(url)
+    }
+
     func selectToday(_ filter: MemoryFilter) {
         selectedTab = .memories
         setMemoryFilter(filter)
@@ -79,6 +139,12 @@ final class AppModel: ObservableObject {
 
     func setMemoryFilter(_ filter: MemoryFilter) {
         memoryFilter = filter
+        guard searchText.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ).isEmpty else {
+            return
+        }
+
         Task { @MainActor in
             do {
                 let filtered = try await client.listMemories(kind: filter.kind)
@@ -87,6 +153,117 @@ final class AppModel: ObservableObject {
             } catch {
                 errorMessage = error.localizedDescription
             }
+        }
+    }
+
+    func setSearchText(_ text: String) {
+        searchText = text
+        searchTask?.cancel()
+        recallTask?.cancel()
+        recallPresentation = nil
+        isRecalling = false
+        focusedMemoryID = nil
+        searchResults = []
+
+        let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return }
+        memoryFilter = .all
+
+        searchTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let results = try await client.searchForRecall(
+                    query: query,
+                    limit: 56
+                )
+                guard !Task.isCancelled, searchText == text else { return }
+                searchResults = results
+            } catch {
+                guard !Task.isCancelled, searchText == text else { return }
+                searchResults = []
+            }
+        }
+    }
+
+    func submitRecall() {
+        let question = searchText.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        guard !question.isEmpty else { return }
+
+        searchTask?.cancel()
+        recallTask?.cancel()
+        recallPresentation = nil
+        isRecalling = true
+
+        recallTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            let localMatches: [Memory]
+            do {
+                localMatches = try await client.searchForRecall(
+                    query: question,
+                    limit: 8
+                )
+            } catch {
+                localMatches = []
+            }
+
+            guard !Task.isCancelled,
+                searchText.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                ) == question
+            else {
+                return
+            }
+            searchResults = localMatches
+
+            let result = await recallClient.recall(
+                question: question,
+                memories: localMatches
+            )
+
+            guard !Task.isCancelled,
+                searchText.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                ) == question
+            else {
+                return
+            }
+
+            if let result,
+                !result.answer.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                ).isEmpty
+            {
+                var memoryByID = Dictionary(
+                    uniqueKeysWithValues: localMatches.map { ($0.id, $0) }
+                )
+                var citedMemories: [Memory] = []
+                for id in result.citedIDs {
+                    if let memory = memoryByID.removeValue(forKey: id) {
+                        citedMemories.append(memory)
+                    }
+                }
+                // Declining to cite is the honest answer to a question we
+                // never recorded, but it should not blank the list: show what
+                // the search did turn up so the user can judge for themselves.
+                let hasCitations = !citedMemories.isEmpty
+                recallPresentation = RecallPresentation(
+                    message: result.answer,
+                    listedMemories: hasCitations ? citedMemories : localMatches,
+                    isFallback: false,
+                    showsCitations: hasCitations
+                )
+            } else {
+                recallPresentation = RecallPresentation(
+                    message: "猫有点困,先看看这些记忆吧",
+                    listedMemories: localMatches,
+                    isFallback: true,
+                    showsCitations: false
+                )
+            }
+            isRecalling = false
         }
     }
 
@@ -108,6 +285,7 @@ final class AppModel: ObservableObject {
                 now: currentTimestamp()
             )
             upsertInMemory(saved)
+            await syncNotifications()
             showsConfirmation = true
             Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
@@ -130,10 +308,26 @@ final class AppModel: ObservableObject {
                     id: memory.id,
                     now: currentTimestamp()
                 )
-                toastMessage = "+1 小鱼干 🐟"
+                showCompletionToast()
                 await refresh()
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                toastMessage = nil
+                await syncNotifications()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func snooze(_ memory: Memory) {
+        Task { @MainActor in
+            let now = currentTimestamp()
+            do {
+                _ = try await client.snoozeReminder(
+                    id: memory.id,
+                    newDueAt: now + 1_800,
+                    now: now
+                )
+                await refresh()
+                await syncNotifications()
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -143,12 +337,33 @@ final class AppModel: ObservableObject {
     func delete(_ memory: Memory) {
         Task { @MainActor in
             do {
-                try await client.deleteMemory(id: memory.id, now: currentTimestamp())
+                try await client.deleteMemory(
+                    id: memory.id,
+                    now: currentTimestamp()
+                )
                 await refresh()
+                await syncNotifications()
             } catch {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    func notificationSchedulerDidChangeMemories(completed: Bool) async {
+        scheduledReminderCount = notificationScheduler.scheduledCount
+        notificationPermission = notificationScheduler.permissionStatus
+        await refresh()
+        if completed {
+            showCompletionToast()
+        }
+    }
+
+    func notificationSchedulerDidSelectMemory(id: String) async {
+        setSearchText("")
+        selectedTab = .memories
+        memoryFilter = .all
+        await refresh()
+        focusedMemoryID = id
     }
 
     private func parseAndReclassify(_ memory: Memory, text: String) async {
@@ -171,9 +386,38 @@ final class AppModel: ObservableObject {
                 now: currentTimestamp()
             )
             upsertInMemory(reclassified)
+            if reclassified.kind == .reminder {
+                await requestNotificationAuthorizationIfNeeded()
+            }
+            await syncNotifications()
         } catch {
             // Capture has already succeeded locally. Background upgrades are
             // deliberately best-effort and never surface errors to the user.
+        }
+    }
+
+    private func requestNotificationAuthorizationIfNeeded() async {
+        guard !promptDefaults.bool(
+            forKey: Self.notificationPromptedKey
+        ) else {
+            return
+        }
+
+        promptDefaults.set(true, forKey: Self.notificationPromptedKey)
+        await notificationScheduler.requestAuthorization()
+    }
+
+    private func syncNotifications() async {
+        let state = await notificationScheduler.sync()
+        scheduledReminderCount = state.scheduledCount
+        notificationPermission = state.permissionStatus
+    }
+
+    private func showCompletionToast() {
+        toastMessage = "+1 小鱼干 🐟"
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            self?.toastMessage = nil
         }
     }
 

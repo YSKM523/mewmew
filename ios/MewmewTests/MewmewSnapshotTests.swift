@@ -25,9 +25,14 @@ final class MewmewSnapshotTests: XCTestCase {
             MemoriesView(
                 memories: TestFixtures.memories,
                 filter: .constant(.all),
+                searchText: .constant(""),
+                recallPresentation: nil,
+                isRecalling: false,
+                focusedMemoryID: nil,
                 now: TestFixtures.now,
                 onComplete: { _ in },
                 onDelete: { _ in },
+                onSubmitRecall: {},
                 onEmptyCapture: {}
             ),
             named: "memories-seeded"
@@ -39,23 +44,105 @@ final class MewmewSnapshotTests: XCTestCase {
             MemoriesView(
                 memories: [],
                 filter: .constant(.all),
+                searchText: .constant(""),
+                recallPresentation: nil,
+                isRecalling: false,
+                focusedMemoryID: nil,
                 now: TestFixtures.now,
                 onComplete: { _ in },
                 onDelete: { _ in },
+                onSubmitRecall: {},
                 onEmptyCapture: {}
             ),
             named: "memories-empty"
         )
     }
 
-    func testSettingsPlaceholder() {
+    func testRecallResult() {
+        assertLightAndDark(
+            MemoriesView(
+                memories: [TestFixtures.passportMemory],
+                filter: .constant(.all),
+                searchText: .constant("护照放哪了？"),
+                recallPresentation: RecallPresentation(
+                    message: "你把护照放在书房第二个抽屉里了。",
+                    listedMemories: [TestFixtures.passportMemory],
+                    isFallback: false,
+                    showsCitations: true
+                ),
+                isRecalling: false,
+                focusedMemoryID: nil,
+                now: TestFixtures.now,
+                onComplete: { _ in },
+                onDelete: { _ in },
+                onSubmitRecall: {},
+                onEmptyCapture: {}
+            ),
+            named: "recall-result"
+        )
+    }
+
+    /// The cat declining to answer must not blank the list — the search still
+    /// found things and the user should be able to judge them.
+    func testRecallWithoutCitations() {
+        assertLightAndDark(
+            MemoriesView(
+                memories: [TestFixtures.passportMemory],
+                filter: .constant(.all),
+                searchText: .constant("我的飞机票订了吗？"),
+                recallPresentation: RecallPresentation(
+                    message: "我没记过这个。",
+                    listedMemories: [TestFixtures.passportMemory],
+                    isFallback: false,
+                    showsCitations: false
+                ),
+                isRecalling: false,
+                focusedMemoryID: nil,
+                now: TestFixtures.now,
+                onComplete: { _ in },
+                onDelete: { _ in },
+                onSubmitRecall: {},
+                onEmptyCapture: {}
+            ),
+            named: "recall-uncited"
+        )
+    }
+
+    func testRecallFallback() {
+        assertLightAndDark(
+            MemoriesView(
+                memories: [TestFixtures.passportMemory],
+                filter: .constant(.all),
+                searchText: .constant("护照放哪了？"),
+                recallPresentation: RecallPresentation(
+                    message: "猫有点困,先看看这些记忆吧",
+                    listedMemories: [TestFixtures.passportMemory],
+                    isFallback: true,
+                    showsCitations: false
+                ),
+                isRecalling: false,
+                focusedMemoryID: nil,
+                now: TestFixtures.now,
+                onComplete: { _ in },
+                onDelete: { _ in },
+                onSubmitRecall: {},
+                onEmptyCapture: {}
+            ),
+            named: "recall-fallback"
+        )
+    }
+
+    func testSettingsPhase3Observability() {
         assertLightAndDark(
             SettingsView(
                 appVersion: "1.0 (1)",
                 databasePath: "/Application Support/mewmew.sqlite3",
+                scheduledReminderCount: 56,
+                notificationPermission: .denied,
                 // Pinned: the real value depends on whether the build carried a
                 // token, which would make this snapshot flap.
-                isClassifierConfigured: true
+                isClassifierConfigured: true,
+                onOpenNotificationSettings: {}
             ),
             named: "settings"
         )

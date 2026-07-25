@@ -43,5 +43,18 @@ enum TestFixtures {
         ),
     ]
 
+    static let passportMemory = Memory(
+        id: "passport-1",
+        kind: .note,
+        rawText: "护照放在书房第二个抽屉里",
+        title: "护照的位置",
+        dueAt: nil,
+        completedAt: nil,
+        question: nil,
+        answer: nil,
+        createdAt: now - 1_800,
+        updatedAt: now - 1_800
+    )
+
     static let catStatus = CatStatus(level: 1, xp: 0, fish: 3, mood: "content")
 }
