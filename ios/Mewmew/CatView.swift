@@ -96,12 +96,15 @@ struct CatView: View {
 
     @ViewBuilder
     private var face: some View {
-        if mood == "content" && !isBlinking {
-            HStack(spacing: 42) {
+        if mood != "sleepy" && !isBlinking {
+            // Happy eyes sit wider open than content ones, so the two moods
+            // still differ when nothing is moving.
+            let eyeSize: CGFloat = mood == "happy" ? 11 : 7
+            HStack(spacing: mood == "happy" ? 38 : 42) {
                 Circle()
-                    .frame(width: 7, height: 7)
+                    .frame(width: eyeSize, height: eyeSize)
                 Circle()
-                    .frame(width: 7, height: 7)
+                    .frame(width: eyeSize, height: eyeSize)
             }
             .foregroundStyle(Theme.primaryText)
             .offset(y: -34)
@@ -135,15 +138,17 @@ struct CatView: View {
 
     private var scarf: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Theme.primaryText)
-                .frame(width: 112, height: 17)
+            // Hanging end first, so the band overlaps its top and the two
+            // read as one piece of cloth rather than a cross.
+            Capsule()
+                .fill(Color.white)
+                .frame(width: 15, height: 44)
+                .rotationEffect(.degrees(-13))
+                .offset(x: 30, y: 22)
 
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Theme.primaryText)
-                .frame(width: 17, height: 48)
-                .rotationEffect(.degrees(-8))
-                .offset(x: 33, y: 25)
+            Capsule()
+                .fill(Color.white)
+                .frame(width: 108, height: 18)
         }
         .offset(y: 40)
     }
@@ -164,8 +169,11 @@ struct CatView: View {
     }
 
     private var tailAngle: Double {
-        guard isAnimated, mood == "happy" else { return 0 }
-        return tailIsRaised ? 10 : -10
+        // Mood sets the resting angle so a still frame still reads as an alert
+        // or a dozing cat; the wag only swings around that rest.
+        guard mood == "happy" else { return 0 }
+        guard isAnimated else { return 9 }
+        return tailIsRaised ? 14 : 4
     }
 
     private var breathingScale: CGFloat {
