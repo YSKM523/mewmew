@@ -38,7 +38,9 @@ protocol UserNotificationCenterServing: AnyObject {
 final class SystemUserNotificationCenter: UserNotificationCenterServing {
     private let center: UNUserNotificationCenter
 
-    init(center: UNUserNotificationCenter = .current()) {
+    // nonisolated so this can serve as a default argument: those are evaluated
+    // outside any actor, and the type itself is @MainActor.
+    nonisolated init(center: UNUserNotificationCenter = .current()) {
         self.center = center
     }
 
