@@ -594,6 +594,8 @@ fn level_for_xp(xp: i64) -> i64 {
 
     fn threshold(level: i64) -> i128 {
         let level = i128::from(level);
+        // Lv.3 is the recurrence seed: each following threshold adds
+        // 40 × (the current level - 1).
         20 * (level - 2) * (level - 1) + 40
     }
 
@@ -643,10 +645,7 @@ fn outfits_for_level(level: i64) -> Vec<&'static str> {
         .collect()
 }
 
-fn fetch_cat_status(
-    connection: &Connection,
-    now: Option<i64>,
-) -> Result<CatStatus, CoreError> {
+fn fetch_cat_status(connection: &Connection, now: Option<i64>) -> Result<CatStatus, CoreError> {
     let (cached_level, xp, fish, stored_mood, last_interaction_at, outfit): (
         i64,
         i64,
@@ -1045,10 +1044,9 @@ fn run_migrations(connection: &mut Connection) -> Result<(), CoreError> {
     }
 
     if current_version == 0 {
-        transaction.execute(
-            "UPDATE cat SET last_interaction_at = NULL WHERE id = 1",
-            [],
-        )?;
+        // A database created in this run has no interaction history. Legacy
+        // rows still keep the v4 backfill from their previous updated_at.
+        transaction.execute("UPDATE cat SET last_interaction_at = NULL WHERE id = 1", [])?;
     }
 
     transaction.commit()?;

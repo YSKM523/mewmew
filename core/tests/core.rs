@@ -157,10 +157,18 @@ fn migrations_are_automatic_and_idempotent() {
             |row| row.get(0),
         )
         .expect("memories table should exist");
+    let fresh_cat: (Option<i64>, String) = connection
+        .query_row(
+            "SELECT last_interaction_at, outfit FROM cat WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("fresh cat should be readable");
 
     assert_eq!(versions, vec![4]);
     assert_eq!(cat_rows, 1);
     assert_eq!(memory_columns, 20);
+    assert_eq!(fresh_cat, (None, "none".to_owned()));
 }
 
 #[test]
@@ -1137,7 +1145,16 @@ fn read_cat_cache(db: &TestDb) -> (i64, i64, i64, Option<i64>, String) {
 fn level_boundaries_are_derived_from_xp_and_repair_the_cache() {
     let db = TestDb::new();
     let core = db.open_core();
-    let cases = [(29, 1), (30, 2), (79, 2), (80, 3), (159, 3), (160, 4)];
+    let cases = [
+        (29, 1),
+        (30, 2),
+        (79, 2),
+        (80, 3),
+        (159, 3),
+        (160, 4),
+        (279, 4),
+        (280, 5),
+    ];
 
     for (xp, expected_level) in cases {
         update_cat(
@@ -1171,9 +1188,7 @@ fn mood_boundaries_are_derived_without_changing_persistent_progress() {
     for (last_interaction_at, expected_mood) in cases {
         update_cat(
             &db,
-            &format!(
-                "UPDATE cat SET last_interaction_at = {last_interaction_at} WHERE id = 1;"
-            ),
+            &format!("UPDATE cat SET last_interaction_at = {last_interaction_at} WHERE id = 1;"),
         );
 
         assert_eq!(
@@ -1241,7 +1256,10 @@ fn feeding_consumes_fish_adds_xp_refreshes_interaction_and_recomputes_level() {
     assert_eq!(status.xp, 39);
     assert_eq!(status.level, 2);
     assert_eq!(status.mood, "happy");
-    assert_eq!(read_cat_cache(&db), (2, 39, 0, Some(50_000), "none".to_owned()));
+    assert_eq!(
+        read_cat_cache(&db),
+        (2, 39, 0, Some(50_000), "none".to_owned())
+    );
 }
 
 #[test]
@@ -1256,12 +1274,51 @@ fn feeding_without_fish_is_invalid_and_atomic() {
          WHERE id = 1;",
     );
     let before = read_cat_cache(&db);
+    let before_full: (i64, i64, i64, String, i64, Option<i64>, String) = Connection::open(&db.path)
+        .expect("database should be inspectable")
+        .query_row(
+            "SELECT level, xp, fish, mood, updated_at, last_interaction_at, outfit
+                 FROM cat WHERE id = 1",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            },
+        )
+        .expect("cat state should be readable");
 
     assert_eq!(
         core.feed_cat(50_000),
         Err(CoreError::Invalid("没有小鱼干了".to_owned()))
     );
     assert_eq!(read_cat_cache(&db), before);
+    let after_full = Connection::open(&db.path)
+        .expect("database should be inspectable")
+        .query_row(
+            "SELECT level, xp, fish, mood, updated_at, last_interaction_at, outfit
+             FROM cat WHERE id = 1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, Option<i64>>(5)?,
+                    row.get::<_, String>(6)?,
+                ))
+            },
+        )
+        .expect("cat state should be readable");
+    assert_eq!(after_full, before_full);
 }
 
 #[test]
@@ -1304,6 +1361,19 @@ fn outfits_require_their_level_and_can_be_set_after_unlocking() {
         .set_outfit("none".to_owned(), 201)
         .expect("unlocked outfits should be switchable");
     assert_eq!(plain.outfit, "none");
+
+    update_cat(&db, "UPDATE cat SET xp = 160, level = 2 WHERE id = 1;");
+    assert_eq!(
+        core.unlocked_outfits()
+            .expect("level four outfits should load"),
+        vec!["none".to_owned(), "scarf".to_owned(), "glasses".to_owned()]
+    );
+    assert_eq!(
+        core.set_outfit("glasses".to_owned(), 300)
+            .expect("level four glasses should be settable")
+            .outfit,
+        "glasses"
+    );
 }
 
 #[test]
@@ -1334,10 +1404,7 @@ fn completing_a_reminder_refreshes_cat_interaction_time() {
     let memory = core
         .add_memory(reminder("Call the vet", "Vet", now + 100), 1_000)
         .expect("reminder should be added");
-    update_cat(
-        &db,
-        "UPDATE cat SET last_interaction_at = 1 WHERE id = 1;",
-    );
+    update_cat(&db, "UPDATE cat SET last_interaction_at = 1 WHERE id = 1;");
 
     core.complete_reminder(memory.id, now)
         .expect("reminder should complete");
@@ -1359,10 +1426,7 @@ fn a_correct_review_refreshes_cat_interaction_time() {
     let memory = core
         .add_memory(card("word", "Word", "Question?", "Answer."), now)
         .expect("card should be added");
-    update_cat(
-        &db,
-        "UPDATE cat SET last_interaction_at = 1 WHERE id = 1;",
-    );
+    update_cat(&db, "UPDATE cat SET last_interaction_at = 1 WHERE id = 1;");
 
     core.review_card(memory.id, ReviewRating::Good, now)
         .expect("correct review should succeed");
