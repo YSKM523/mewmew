@@ -54,7 +54,7 @@ final class Phase5CatTests: XCTestCase {
         XCTAssertEqual(model.catStatus, originalStatus)
         XCTAssertEqual(
             model.errorMessage,
-            "没有小鱼干了，完成提醒或复习就能得到"
+            "没有小鱼干了,完成提醒或复习就能得到"
         )
         let feedCallCount = await core.receivedFeedCallCount()
         XCTAssertEqual(feedCallCount, 1)
@@ -87,7 +87,7 @@ final class Phase5CatTests: XCTestCase {
         XCTAssertEqual(model.catStatus, emptyStatus)
         XCTAssertEqual(
             model.errorMessage,
-            "没有小鱼干了，完成提醒或复习就能得到"
+            "没有小鱼干了,完成提醒或复习就能得到"
         )
         let feedCallCount = await core.receivedFeedCallCount()
         XCTAssertEqual(feedCallCount, 0)

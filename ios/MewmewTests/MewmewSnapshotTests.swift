@@ -136,7 +136,7 @@ final class MewmewSnapshotTests: XCTestCase {
                 filter: .constant(.all),
                 searchText: .constant("护照放哪了？"),
                 recallPresentation: RecallPresentation(
-                    message: "你把护照放在书房第二个抽屉里了。",
+                    message: "你把护照放在书房第二个抽屉里了",
                     listedMemories: [TestFixtures.passportMemory],
                     isFallback: false,
                     showsCitations: true
@@ -162,7 +162,7 @@ final class MewmewSnapshotTests: XCTestCase {
                 filter: .constant(.all),
                 searchText: .constant("我的飞机票订了吗？"),
                 recallPresentation: RecallPresentation(
-                    message: "我没记过这个。",
+                    message: "我没记过这个",
                     listedMemories: [TestFixtures.passportMemory],
                     isFallback: false,
                     showsCitations: false

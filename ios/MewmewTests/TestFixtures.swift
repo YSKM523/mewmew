@@ -25,7 +25,7 @@ enum TestFixtures {
             dueAt: nil,
             completedAt: nil,
             question: "Rust 的所有权解决什么问题？",
-            answer: "在编译期保证内存安全。",
+            answer: "在编译期保证内存安全",
             createdAt: now - 14_400,
             updatedAt: now - 14_400
         ),
@@ -72,7 +72,7 @@ enum TestFixtures {
         dueAt: nil,
         completedAt: nil,
         question: "ephemeral 是什么意思？",
-        answer: "短暂的；转瞬即逝的。",
+        answer: "短暂的；转瞬即逝的",
         createdAt: now - 3_600,
         updatedAt: now - 3_600
     )
