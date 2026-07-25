@@ -104,6 +104,7 @@ final class NotificationScheduler: NSObject, ObservableObject, NotificationSched
     static let categoryIdentifier = "reminder"
     static let completeActionIdentifier = "COMPLETE"
     static let snoozeActionIdentifier = "SNOOZE"
+    static let reviewDigestIdentifier = "review-digest"
 
     weak var delegate: NotificationSchedulerDelegate?
     @Published private(set) var scheduledCount = 0
@@ -112,18 +113,62 @@ final class NotificationScheduler: NSObject, ObservableObject, NotificationSched
     private let client: CoreClientProtocol
     private let center: UserNotificationCenterServing
     private let currentTimestamp: () -> Int64
+    private let calendar: Calendar
 
     init(
         client: CoreClientProtocol,
         center: UserNotificationCenterServing = SystemUserNotificationCenter(),
         currentTimestamp: @escaping () -> Int64 = {
             Int64(Date().timeIntervalSince1970)
-        }
+        },
+        calendar: Calendar = .current
     ) {
         self.client = client
         self.center = center
         self.currentTimestamp = currentTimestamp
+        self.calendar = calendar
         super.init()
+    }
+
+    nonisolated static func adjustedReviewDeliveryDate(
+        _ dueDate: Date,
+        calendar: Calendar
+    ) -> Date {
+        let hour = calendar.component(.hour, from: dueDate)
+        guard hour >= 21 || hour < 9 else { return dueDate }
+
+        let targetDay: Date
+        if hour >= 21 {
+            targetDay = calendar.date(
+                byAdding: .day,
+                value: 1,
+                to: dueDate
+            ) ?? dueDate
+        } else {
+            targetDay = dueDate
+        }
+
+        return calendar.date(
+            bySettingHour: 9,
+            minute: 0,
+            second: 0,
+            of: targetDay
+        ) ?? dueDate
+    }
+
+    private func nextReviewDigest(
+        now: Int64
+    ) async throws -> (dueAt: Int64, count: UInt32)? {
+        let dueNow = try await client.dueCardCount(now: now)
+        if dueNow > 0 {
+            return (now, dueNow)
+        }
+
+        guard let next = try await client.nextCardDueAt(now: now) else {
+            return nil
+        }
+        let count = try await client.dueCardCount(now: next)
+        return count > 0 ? (next, count) : nil
     }
 
     func registerCategories() {
@@ -159,13 +204,14 @@ final class NotificationScheduler: NSObject, ObservableObject, NotificationSched
     func sync() async -> NotificationScheduleState {
         center.removeAllPendingNotificationRequests()
         permissionStatus = await center.authorizationStatus()
+        let now = currentTimestamp()
+        var registeredCount = 0
 
         do {
             let reminders = try await client.pendingReminders(
                 limit: 56,
-                now: currentTimestamp()
+                now: now
             )
-            var registeredCount = 0
 
             for memory in reminders {
                 guard let dueAt = memory.dueAt else { continue }
@@ -180,11 +226,11 @@ final class NotificationScheduler: NSObject, ObservableObject, NotificationSched
                 let date = Date(
                     timeIntervalSince1970: TimeInterval(dueAt)
                 )
-                var components = Calendar.current.dateComponents(
+                var components = calendar.dateComponents(
                     [.year, .month, .day, .hour, .minute, .second],
                     from: date
                 )
-                components.timeZone = .current
+                components.timeZone = calendar.timeZone
                 let trigger = UNCalendarNotificationTrigger(
                     dateMatching: components,
                     repeats: false
@@ -204,12 +250,56 @@ final class NotificationScheduler: NSObject, ObservableObject, NotificationSched
                     // center.
                 }
             }
-
-            scheduledCount = registeredCount
         } catch {
-            scheduledCount = 0
+            // Review scheduling remains independent when reminder replay fails.
         }
 
+        do {
+            let pendingDigest = try await nextReviewDigest(now: now)
+            if let digest = pendingDigest {
+                let dueDate = Date(
+                    timeIntervalSince1970: TimeInterval(digest.dueAt)
+                )
+                let adjusted = Self.adjustedReviewDeliveryDate(
+                    dueDate,
+                    calendar: calendar
+                )
+                // One second keeps an already-due daytime calendar trigger in
+                // the future after truncating the Unix timestamp.
+                let deliveryDate = digest.dueAt <= now && adjusted == dueDate
+                    ? adjusted.addingTimeInterval(1)
+                    : adjusted
+                var components = calendar.dateComponents(
+                    [.year, .month, .day, .hour, .minute, .second],
+                    from: deliveryDate
+                )
+                components.timeZone = calendar.timeZone
+
+                let content = UNMutableNotificationContent()
+                content.title = "🐱 有 \(digest.count) 张卡片等你"
+                content.sound = .default
+                let trigger = UNCalendarNotificationTrigger(
+                    dateMatching: components,
+                    repeats: false
+                )
+                let request = UNNotificationRequest(
+                    identifier: Self.reviewDigestIdentifier,
+                    content: content,
+                    trigger: trigger
+                )
+
+                do {
+                    try await center.add(request)
+                    registeredCount += 1
+                } catch {
+                    // The accepted request count remains authoritative.
+                }
+            }
+        } catch {
+            // Reminder replay remains useful if the review query fails.
+        }
+
+        scheduledCount = registeredCount
         return NotificationScheduleState(
             scheduledCount: scheduledCount,
             permissionStatus: permissionStatus

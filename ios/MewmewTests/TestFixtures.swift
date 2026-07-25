@@ -57,4 +57,17 @@ enum TestFixtures {
     )
 
     static let catStatus = CatStatus(level: 1, xp: 0, fish: 3, mood: "content")
+
+    static let reviewCard = Memory(
+        id: "review-card-1",
+        kind: .card,
+        rawText: "ephemeral 是短暂的意思",
+        title: "ephemeral",
+        dueAt: nil,
+        completedAt: nil,
+        question: "ephemeral 是什么意思？",
+        answer: "短暂的；转瞬即逝的。",
+        createdAt: now - 3_600,
+        updatedAt: now - 3_600
+    )
 }

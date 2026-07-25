@@ -1,6 +1,17 @@
 import Foundation
 
-protocol CoreClientProtocol: Sendable {
+protocol ReviewServing: Sendable {
+    func dueCardCount(now: Int64) async throws -> UInt32
+    func nextCardDueAt(now: Int64) async throws -> Int64?
+    func dueCards(limit: UInt32, now: Int64) async throws -> [Memory]
+    func reviewCard(
+        id: String,
+        rating: ReviewRating,
+        now: Int64
+    ) async throws -> ReviewOutcome
+}
+
+protocol CoreClientProtocol: ReviewServing, Sendable {
     func addMemory(memory: NewMemory, now: Int64) async throws -> Memory
     func getMemory(id: String) async throws -> Memory
     func reclassifyMemory(
@@ -81,6 +92,26 @@ actor CoreClient: CoreClientProtocol {
 
     func pendingReminders(limit: UInt32, now: Int64) async throws -> [Memory] {
         try instance().pendingReminders(limit: limit, now: now)
+    }
+
+    func dueCardCount(now: Int64) async throws -> UInt32 {
+        try instance().dueCardCount(now: now)
+    }
+
+    func nextCardDueAt(now: Int64) async throws -> Int64? {
+        try instance().nextCardDueAt(now: now)
+    }
+
+    func dueCards(limit: UInt32, now: Int64) async throws -> [Memory] {
+        try instance().dueCards(limit: limit, now: now)
+    }
+
+    func reviewCard(
+        id: String,
+        rating: ReviewRating,
+        now: Int64
+    ) async throws -> ReviewOutcome {
+        try instance().reviewCard(id: id, rating: rating, now: now)
     }
 
     func completeReminder(id: String, now: Int64) async throws -> Memory {

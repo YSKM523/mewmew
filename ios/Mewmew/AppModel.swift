@@ -17,8 +17,10 @@ final class AppModel: ObservableObject, NotificationSchedulerDelegate {
     @Published private(set) var isRecalling = false
     @Published var focusedMemoryID: String?
     @Published private(set) var scheduledReminderCount = 0
+    @Published private(set) var dueCardCount = 0
     @Published private(set) var notificationPermission =
         NotificationPermissionStatus.notDetermined
+    @Published var reviewSession: ReviewSessionModel?
 
     private static let notificationPromptedKey =
         "hasRequestedReminderNotificationAuthorization"
@@ -91,10 +93,6 @@ final class AppModel: ObservableObject, NotificationSchedulerDelegate {
         }.count
     }
 
-    var dueCardCount: Int {
-        allMemories.filter { $0.kind == .card }.count
-    }
-
     func start() async {
         guard !hasStarted else { return }
         hasStarted = true
@@ -116,6 +114,9 @@ final class AppModel: ObservableObject, NotificationSchedulerDelegate {
                 memories = allMemories
             }
             catStatus = try await client.catStatus()
+            dueCardCount = Int(
+                try await client.dueCardCount(now: currentTimestamp())
+            )
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -123,6 +124,19 @@ final class AppModel: ObservableObject, NotificationSchedulerDelegate {
 
     func openCapture() {
         isCapturePresented = true
+    }
+
+    func openReviewSession() {
+        guard dueCardCount > 0, reviewSession == nil else { return }
+        reviewSession = ReviewSessionModel(
+            client: client,
+            currentTimestamp: currentTimestamp
+        )
+    }
+
+    func reviewSessionDidDismiss() async {
+        await refresh()
+        await syncNotifications()
     }
 
     func openNotificationSettings() {
@@ -389,6 +403,9 @@ final class AppModel: ObservableObject, NotificationSchedulerDelegate {
             if reclassified.kind == .reminder {
                 await requestNotificationAuthorizationIfNeeded()
             }
+            dueCardCount = Int(
+                try await client.dueCardCount(now: currentTimestamp())
+            )
             await syncNotifications()
         } catch {
             // Capture has already succeeded locally. Background upgrades are

@@ -181,6 +181,44 @@ private actor FakeCoreClient: CoreClientProtocol {
         )
     }
 
+    func dueCardCount(now: Int64) async throws -> UInt32 {
+        UInt32(
+            memories.filter {
+                $0.kind == .card
+                    && $0.question?.isEmpty == false
+                    && $0.answer?.isEmpty == false
+            }.count
+        )
+    }
+
+    func nextCardDueAt(now: Int64) async throws -> Int64? {
+        nil
+    }
+
+    func dueCards(limit: UInt32, now: Int64) async throws -> [Memory] {
+        Array(
+            memories.filter {
+                $0.kind == .card
+                    && $0.question?.isEmpty == false
+                    && $0.answer?.isEmpty == false
+            }
+            .prefix(Int(limit))
+        )
+    }
+
+    func reviewCard(
+        id: String,
+        rating: ReviewRating,
+        now: Int64
+    ) async throws -> ReviewOutcome {
+        let memory = try await getMemory(id: id)
+        return ReviewOutcome(
+            memory: memory,
+            nextDueAt: now + 600,
+            earnedFish: rating == .good || rating == .easy
+        )
+    }
+
     func completeReminder(id: String, now: Int64) async throws -> Memory {
         try await getMemory(id: id)
     }

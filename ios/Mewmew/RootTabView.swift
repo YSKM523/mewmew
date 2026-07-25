@@ -12,7 +12,8 @@ struct RootTabView: View {
                 dueCardCount: model.dueCardCount,
                 showsConfirmation: model.showsConfirmation,
                 onCapture: model.openCapture,
-                onSelectToday: model.selectToday
+                onSelectToday: model.selectToday,
+                onReview: model.openReviewSession
             )
             .tabItem {
                 Label("猫", systemImage: "cat.fill")
@@ -63,6 +64,23 @@ struct RootTabView: View {
             CaptureSheet(
                 speechCapture: SpeechCapture(),
                 onSave: model.captureNote
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(
+            item: $model.reviewSession,
+            onDismiss: {
+                Task { @MainActor in
+                    await model.reviewSessionDidDismiss()
+                }
+            }
+        ) { session in
+            ReviewSessionView(
+                model: session,
+                onReturnHome: {
+                    model.selectedTab = .cat
+                }
             )
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)

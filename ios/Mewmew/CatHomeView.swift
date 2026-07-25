@@ -7,6 +7,7 @@ struct CatHomeView: View {
     let showsConfirmation: Bool
     let onCapture: () -> Void
     let onSelectToday: (MemoryFilter) -> Void
+    let onReview: () -> Void
 
     var body: some View {
         GeometryReader { proxy in
@@ -89,7 +90,8 @@ struct CatHomeView: View {
                     title: "到期卡片",
                     count: dueCardCount,
                     systemImage: "rectangle.stack.fill",
-                    action: { onSelectToday(.card) }
+                    isEnabled: dueCardCount > 0,
+                    action: onReview
                 )
             }
         }
@@ -100,6 +102,7 @@ private struct TodaySummaryCard: View {
     let title: String
     let count: Int
     let systemImage: String
+    var isEnabled = true
     let action: () -> Void
 
     var body: some View {
@@ -127,6 +130,11 @@ private struct TodaySummaryCard: View {
             }
         }
         .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.55)
         .accessibilityLabel("\(title)，\(count)")
+        .accessibilityHint(
+            Text(isEnabled ? "打开" : "暂无可复习卡片")
+        )
     }
 }

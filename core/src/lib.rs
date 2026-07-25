@@ -287,6 +287,26 @@ impl MewmewCore {
         u32::try_from(count).map_err(|_| CoreError::Db("due card count overflow".to_owned()))
     }
 
+    /// When the soonest not-yet-due card comes up, for scheduling the review
+    /// notification. Returns None when nothing is waiting in the future.
+    pub fn next_card_due_at(&self, now: i64) -> Result<Option<i64>, CoreError> {
+        let connection = self.lock_connection()?;
+        Ok(connection
+            .query_row(
+                "SELECT MIN(fsrs_due)
+                 FROM memories
+                 WHERE deleted_at IS NULL
+                   AND kind = 'card'
+                   AND length(trim(question)) > 0
+                   AND length(trim(answer)) > 0
+                   AND fsrs_due > ?1",
+                [now],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
     pub fn review_card(
         &self,
         id: String,

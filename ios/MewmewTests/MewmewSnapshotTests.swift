@@ -14,7 +14,8 @@ final class MewmewSnapshotTests: XCTestCase {
                 dueCardCount: 1,
                 showsConfirmation: false,
                 onCapture: {},
-                onSelectToday: { _ in }
+                onSelectToday: { _ in },
+                onReview: {}
             ),
             named: "cat-home"
         )
@@ -171,6 +172,63 @@ final class MewmewSnapshotTests: XCTestCase {
         )
     }
 
+    func testReviewSessionQuestion() {
+        assertLightAndDark(
+            ReviewSessionView(
+                model: ReviewSessionModel(
+                    client: SnapshotReviewClient(),
+                    currentTimestamp: { TestFixtures.now },
+                    previewCards: [TestFixtures.reviewCard],
+                    previewCurrentIndex: 0,
+                    previewIsAnswerRevealed: false,
+                    previewReviewedCount: 0,
+                    previewEarnedFishCount: 0,
+                    previewIsComplete: false
+                ),
+                onReturnHome: {}
+            ),
+            named: "review-question"
+        )
+    }
+
+    func testReviewSessionAnswer() {
+        assertLightAndDark(
+            ReviewSessionView(
+                model: ReviewSessionModel(
+                    client: SnapshotReviewClient(),
+                    currentTimestamp: { TestFixtures.now },
+                    previewCards: [TestFixtures.reviewCard],
+                    previewCurrentIndex: 0,
+                    previewIsAnswerRevealed: true,
+                    previewReviewedCount: 0,
+                    previewEarnedFishCount: 0,
+                    previewIsComplete: false
+                ),
+                onReturnHome: {}
+            ),
+            named: "review-answer"
+        )
+    }
+
+    func testReviewSessionSummary() {
+        assertLightAndDark(
+            ReviewSessionView(
+                model: ReviewSessionModel(
+                    client: SnapshotReviewClient(),
+                    currentTimestamp: { TestFixtures.now },
+                    previewCards: [TestFixtures.reviewCard],
+                    previewCurrentIndex: 1,
+                    previewIsAnswerRevealed: false,
+                    previewReviewedCount: 1,
+                    previewEarnedFishCount: 1,
+                    previewIsComplete: true
+                ),
+                onReturnHome: {}
+            ),
+            named: "review-summary"
+        )
+    }
+
     private func assertLightAndDark<V: View>(
         _ makeView: @autoclosure () -> V,
         named name: String,
@@ -226,4 +284,30 @@ private final class FakeSpeechCapture: SpeechCapturing {
     func stop() {
         isRecording = false
     }
+}
+
+private actor SnapshotReviewClient: ReviewServing {
+    func dueCardCount(now: Int64) async throws -> UInt32 {
+        0
+    }
+
+    func nextCardDueAt(now: Int64) async throws -> Int64? {
+        nil
+    }
+
+    func dueCards(limit: UInt32, now: Int64) async throws -> [Memory] {
+        []
+    }
+
+    func reviewCard(
+        id: String,
+        rating: ReviewRating,
+        now: Int64
+    ) async throws -> ReviewOutcome {
+        throw SnapshotReviewClientError.unexpectedCall
+    }
+}
+
+private enum SnapshotReviewClientError: Error {
+    case unexpectedCall
 }

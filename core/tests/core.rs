@@ -1023,3 +1023,36 @@ fn review_rejects_missing_deleted_non_card_and_incomplete_cards() {
     }
     assert_eq!(core.cat_status().expect("cat should be readable").fish, 0);
 }
+
+#[test]
+fn next_card_due_at_reports_the_soonest_future_card() {
+    let db = TestDb::new();
+    let core = db.open_core();
+    let now = 1_800_000_000;
+
+    assert_eq!(core.next_card_due_at(now).unwrap(), None);
+
+    let soon = core
+        .add_memory(card("近的", "近的", "近?", "近"), now)
+        .unwrap()
+        .id;
+    let later = core
+        .add_memory(card("远的", "远的", "远?", "远"), now)
+        .unwrap()
+        .id;
+    // Both start due immediately; reviewing pushes them into the future.
+    let soon_out = core.review_card(soon, ReviewRating::Good, now).unwrap();
+    let later_out = core.review_card(later, ReviewRating::Easy, now).unwrap();
+    assert!(later_out.next_due_at > soon_out.next_due_at);
+
+    assert_eq!(
+        core.next_card_due_at(now).unwrap(),
+        Some(soon_out.next_due_at),
+        "should report the nearest upcoming card"
+    );
+    assert_eq!(
+        core.next_card_due_at(soon_out.next_due_at).unwrap(),
+        Some(later_out.next_due_at),
+        "a card at or before now is no longer upcoming"
+    );
+}
