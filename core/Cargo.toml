@@ -8,7 +8,9 @@ name = "mewmew_core"
 crate-type = ["lib", "staticlib", "cdylib"]
 
 [dependencies]
+chrono = "0.4"
 rusqlite = { version = "0.37", features = ["bundled", "functions"] }
+rs-fsrs = "1.2.1"
 thiserror = "2"
 uniffi = { version = "0.29", features = ["cli"] }
 uuid = { version = "1", features = ["v4"] }

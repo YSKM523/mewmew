@@ -2,6 +2,8 @@
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use chrono::{DateTime, Utc};
+use rs_fsrs::{Card, Parameters, Rating, State, FSRS};
 use rusqlite::functions::FunctionFlags;
 use rusqlite::types::Type;
 use rusqlite::{params, Connection, OptionalExtension, Row};
@@ -75,6 +77,48 @@ pub struct CatStatus {
     pub mood: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ReviewRating {
+    Again,
+    Hard,
+    Good,
+    Easy,
+}
+
+impl ReviewRating {
+    fn as_fsrs_rating(self) -> Rating {
+        match self {
+            Self::Again => Rating::Again,
+            Self::Hard => Rating::Hard,
+            Self::Good => Rating::Good,
+            Self::Easy => Rating::Easy,
+        }
+    }
+
+    fn earns_fish(self) -> bool {
+        matches!(self, Self::Good | Self::Easy)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ReviewOutcome {
+    pub memory: Memory,
+    pub next_due_at: i64,
+    pub earned_fish: bool,
+}
+
+struct StoredFsrsCard {
+    due: Option<i64>,
+    stability: Option<f64>,
+    difficulty: Option<f64>,
+    elapsed_days: i64,
+    scheduled_days: i64,
+    reps: i32,
+    lapses: i32,
+    state: i64,
+    last_review: Option<i64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct NewMemory {
     pub kind: MemoryKind,
@@ -110,8 +154,11 @@ impl MewmewCore {
         connection.execute(
             "INSERT INTO memories (
                 id, kind, raw_text, title, due_at, completed_at, question, answer,
-                created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, ?8, ?8)",
+                fsrs_due, created_at, updated_at
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7,
+                CASE WHEN ?2 = 'card' THEN ?8 ELSE NULL END, ?8, ?8
+             )",
             params![
                 id,
                 memory.kind.as_db_value(),
@@ -147,6 +194,10 @@ impl MewmewCore {
         let changed = connection.execute(
             "UPDATE memories
              SET kind = ?1, title = ?2, due_at = ?3, question = ?4, answer = ?5,
+                 fsrs_due = CASE
+                     WHEN ?1 = 'card' AND fsrs_due IS NULL THEN created_at
+                     ELSE fsrs_due
+                 END,
                  updated_at = ?6
              WHERE id = ?7 AND deleted_at IS NULL",
             params![kind.as_db_value(), title, due_at, question, answer, now, id,],
@@ -200,6 +251,100 @@ impl MewmewCore {
         )?;
         let rows = statement.query_map(params![now, i64::from(limit)], memory_from_row)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn due_cards(&self, limit: u32, now: i64) -> Result<Vec<Memory>, CoreError> {
+        let connection = self.lock_connection()?;
+        let mut statement = connection.prepare(
+            "SELECT id, kind, raw_text, title, due_at, completed_at, question, answer,
+                    created_at, updated_at
+             FROM memories
+             WHERE deleted_at IS NULL
+               AND kind = 'card'
+               AND length(trim(question)) > 0
+               AND length(trim(answer)) > 0
+               AND fsrs_due <= ?1
+             ORDER BY fsrs_due ASC, id ASC
+             LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![now, i64::from(limit)], memory_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn due_card_count(&self, now: i64) -> Result<u32, CoreError> {
+        let connection = self.lock_connection()?;
+        let count: i64 = connection.query_row(
+            "SELECT COUNT(*)
+             FROM memories
+             WHERE deleted_at IS NULL
+               AND kind = 'card'
+               AND length(trim(question)) > 0
+               AND length(trim(answer)) > 0
+               AND fsrs_due <= ?1",
+            [now],
+            |row| row.get(0),
+        )?;
+        u32::try_from(count).map_err(|_| CoreError::Db("due card count overflow".to_owned()))
+    }
+
+    pub fn review_card(
+        &self,
+        id: String,
+        rating: ReviewRating,
+        now: i64,
+    ) -> Result<ReviewOutcome, CoreError> {
+        let now_utc = unix_timestamp(now)?;
+        let mut connection = self.lock_connection()?;
+        let transaction = connection.transaction()?;
+        let stored = fetch_review_card(&transaction, &id, now_utc)?;
+        let fsrs = FSRS::new(Parameters::default());
+        let mut scheduler = fsrs.scheduler(stored, now_utc);
+        let next = scheduler.review(rating.as_fsrs_rating()).card;
+        let earned_fish = rating.earns_fish();
+
+        transaction.execute(
+            "UPDATE memories
+             SET fsrs_due = ?1,
+                 fsrs_stability = ?2,
+                 fsrs_difficulty = ?3,
+                 fsrs_elapsed_days = ?4,
+                 fsrs_scheduled_days = ?5,
+                 fsrs_reps = ?6,
+                 fsrs_lapses = ?7,
+                 fsrs_state = ?8,
+                 fsrs_last_review = ?9,
+                 updated_at = ?10
+             WHERE id = ?11 AND deleted_at IS NULL",
+            params![
+                next.due.timestamp(),
+                next.stability,
+                next.difficulty,
+                next.elapsed_days,
+                next.scheduled_days,
+                next.reps,
+                next.lapses,
+                state_db_value(next.state),
+                next.last_review.timestamp(),
+                now,
+                id,
+            ],
+        )?;
+
+        if earned_fish {
+            transaction.execute(
+                "UPDATE cat SET fish = fish + 1, updated_at = ?1 WHERE id = 1",
+                [now],
+            )?;
+        }
+
+        let memory = fetch_memory(&transaction, &id)?;
+        let outcome = ReviewOutcome {
+            memory,
+            next_due_at: next.due.timestamp(),
+            earned_fish,
+        };
+        transaction.commit()?;
+        Ok(outcome)
     }
 
     pub fn complete_reminder(&self, id: String, now: i64) -> Result<Memory, CoreError> {
@@ -358,6 +503,96 @@ impl MewmewCore {
             .lock()
             .map_err(|_| CoreError::Db("database mutex was poisoned".to_owned()))
     }
+}
+
+fn unix_timestamp(timestamp: i64) -> Result<DateTime<Utc>, CoreError> {
+    DateTime::from_timestamp(timestamp, 0)
+        .ok_or_else(|| CoreError::Invalid(format!("invalid unix timestamp: {timestamp}")))
+}
+
+fn state_from_db_value(value: i64) -> Result<State, CoreError> {
+    match value {
+        0 => Ok(State::New),
+        1 => Ok(State::Learning),
+        2 => Ok(State::Review),
+        3 => Ok(State::Relearning),
+        other => Err(CoreError::Invalid(format!("invalid FSRS state: {other}"))),
+    }
+}
+
+const fn state_db_value(state: State) -> i64 {
+    match state {
+        State::New => 0,
+        State::Learning => 1,
+        State::Review => 2,
+        State::Relearning => 3,
+    }
+}
+
+fn fetch_review_card(
+    connection: &Connection,
+    id: &str,
+    now: DateTime<Utc>,
+) -> Result<Card, CoreError> {
+    let memory = fetch_memory(connection, id)?;
+    if memory.kind != MemoryKind::Card {
+        return Err(CoreError::Invalid("only cards can be reviewed".to_owned()));
+    }
+    if memory
+        .question
+        .as_deref()
+        .is_none_or(|question| question.trim().is_empty())
+    {
+        return Err(CoreError::Invalid(
+            "card must have a non-empty question".to_owned(),
+        ));
+    }
+    if memory
+        .answer
+        .as_deref()
+        .is_none_or(|answer| answer.trim().is_empty())
+    {
+        return Err(CoreError::Invalid(
+            "card must have a non-empty answer".to_owned(),
+        ));
+    }
+
+    let stored = connection.query_row(
+        "SELECT fsrs_due, fsrs_stability, fsrs_difficulty, fsrs_elapsed_days,
+                fsrs_scheduled_days, fsrs_reps, fsrs_lapses, fsrs_state,
+                fsrs_last_review
+         FROM memories
+         WHERE id = ?1 AND deleted_at IS NULL",
+        [id],
+        |row| {
+            Ok(StoredFsrsCard {
+                due: row.get(0)?,
+                stability: row.get(1)?,
+                difficulty: row.get(2)?,
+                elapsed_days: row.get(3)?,
+                scheduled_days: row.get(4)?,
+                reps: row.get(5)?,
+                lapses: row.get(6)?,
+                state: row.get(7)?,
+                last_review: row.get(8)?,
+            })
+        },
+    )?;
+
+    Ok(Card {
+        due: unix_timestamp(stored.due.unwrap_or(memory.created_at))?,
+        stability: stored.stability.unwrap_or_default(),
+        difficulty: stored.difficulty.unwrap_or_default(),
+        elapsed_days: stored.elapsed_days,
+        scheduled_days: stored.scheduled_days,
+        reps: stored.reps,
+        lapses: stored.lapses,
+        state: state_from_db_value(stored.state)?,
+        last_review: match stored.last_review {
+            Some(timestamp) => unix_timestamp(timestamp)?,
+            None => now,
+        },
+    })
 }
 
 fn fetch_memory(connection: &Connection, id: &str) -> Result<Memory, CoreError> {
@@ -579,6 +814,17 @@ fn migrations() -> Vec<&'static str> {
         BEGIN
           DELETE FROM memories_fts WHERE rowid = old.rowid;
         END;
+        ",
+        "
+        ALTER TABLE memories ADD COLUMN fsrs_last_review INTEGER;
+        ALTER TABLE memories
+          ADD COLUMN fsrs_elapsed_days INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE memories
+          ADD COLUMN fsrs_scheduled_days INTEGER NOT NULL DEFAULT 0;
+
+        UPDATE memories
+        SET fsrs_due = created_at
+        WHERE kind = 'card' AND fsrs_due IS NULL;
         ",
     ]
 }

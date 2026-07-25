@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use mewmew_core::{CoreError, MemoryKind, MewmewCore, NewMemory};
+use mewmew_core::{CoreError, MemoryKind, MewmewCore, NewMemory, ReviewRating};
 use rusqlite::Connection;
 use uuid::Uuid;
 
@@ -158,9 +158,9 @@ fn migrations_are_automatic_and_idempotent() {
         )
         .expect("memories table should exist");
 
-    assert_eq!(versions, vec![2]);
+    assert_eq!(versions, vec![3]);
     assert_eq!(cat_rows, 1);
-    assert_eq!(memory_columns, 17);
+    assert_eq!(memory_columns, 20);
 }
 
 #[test]
@@ -549,7 +549,7 @@ fn recall_migration_backfills_existing_schema_version_one_rows() {
     let indexed_rows: i64 = connection
         .query_row("SELECT COUNT(*) FROM memories_fts", [], |row| row.get(0))
         .expect("FTS table should be readable");
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
     assert_eq!(indexed_rows, 1);
 }
 
@@ -630,4 +630,396 @@ fn reclassifying_a_memory_does_not_change_cat_fish() {
         core.cat_status().expect("cat should remain readable").fish,
         fish_before
     );
+}
+
+#[derive(Debug, PartialEq)]
+struct FsrsState {
+    due: i64,
+    stability: f64,
+    difficulty: f64,
+    last_review: i64,
+    elapsed_days: i64,
+    scheduled_days: i64,
+    reps: i64,
+    lapses: i64,
+    state: i64,
+    updated_at: i64,
+}
+
+fn read_fsrs_state(db: &TestDb, id: &str) -> FsrsState {
+    Connection::open(&db.path)
+        .expect("database should be inspectable")
+        .query_row(
+            "SELECT fsrs_due, fsrs_stability, fsrs_difficulty, fsrs_last_review,
+                    fsrs_elapsed_days, fsrs_scheduled_days, fsrs_reps, fsrs_lapses,
+                    fsrs_state, updated_at
+             FROM memories
+             WHERE id = ?1",
+            [id],
+            |row| {
+                Ok(FsrsState {
+                    due: row.get(0)?,
+                    stability: row.get(1)?,
+                    difficulty: row.get(2)?,
+                    last_review: row.get(3)?,
+                    elapsed_days: row.get(4)?,
+                    scheduled_days: row.get(5)?,
+                    reps: row.get(6)?,
+                    lapses: row.get(7)?,
+                    state: row.get(8)?,
+                    updated_at: row.get(9)?,
+                })
+            },
+        )
+        .expect("FSRS state should be readable")
+}
+
+#[test]
+fn migration_v3_backfills_existing_cards_and_preserves_fts_recall() {
+    let db = TestDb::new();
+    let connection = Connection::open(&db.path).expect("legacy database should open");
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE schema_version (version INTEGER NOT NULL);
+            INSERT INTO schema_version (version) VALUES (2);
+            CREATE TABLE memories (
+              id TEXT PRIMARY KEY,
+              kind TEXT NOT NULL,
+              raw_text TEXT NOT NULL,
+              title TEXT NOT NULL,
+              due_at INTEGER,
+              completed_at INTEGER,
+              question TEXT,
+              answer TEXT,
+              fsrs_due INTEGER,
+              fsrs_stability REAL,
+              fsrs_difficulty REAL,
+              fsrs_reps INTEGER NOT NULL DEFAULT 0,
+              fsrs_lapses INTEGER NOT NULL DEFAULT 0,
+              fsrs_state INTEGER NOT NULL DEFAULT 0,
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL,
+              deleted_at INTEGER
+            );
+            CREATE TABLE cat (
+              id INTEGER PRIMARY KEY CHECK (id = 1),
+              level INTEGER NOT NULL DEFAULT 1,
+              xp INTEGER NOT NULL DEFAULT 0,
+              fish INTEGER NOT NULL DEFAULT 0,
+              mood TEXT NOT NULL DEFAULT 'content',
+              updated_at INTEGER NOT NULL
+            );
+            INSERT INTO cat (id, updated_at) VALUES (1, 0);
+            INSERT INTO memories (
+              id, kind, raw_text, title, question, answer, created_at, updated_at
+            ) VALUES (
+              'legacy-card', 'card', 'ephemeral 是短暂的意思', 'ephemeral',
+              'ephemeral 是什么意思？', '短暂的。', 123, 123
+            );
+
+            CREATE VIRTUAL TABLE memories_fts USING fts5(
+              raw_text, title, question, answer, tokenize = 'unicode61'
+            );
+            INSERT INTO memories_fts (rowid, raw_text, title, question, answer)
+            SELECT rowid, 'ephemeral 是 短 暂 的 意 思', 'ephemeral',
+                   'ephemeral 是 什 么 意 思', '短 暂 的'
+            FROM memories;
+
+            CREATE TRIGGER memories_fts_after_insert
+            AFTER INSERT ON memories
+            WHEN new.deleted_at IS NULL
+            BEGIN
+              INSERT INTO memories_fts (rowid, raw_text, title, question, answer)
+              VALUES (
+                new.rowid,
+                mewmew_fts_tokens(new.raw_text),
+                mewmew_fts_tokens(new.title),
+                mewmew_fts_tokens(new.question),
+                mewmew_fts_tokens(new.answer)
+              );
+            END;
+            CREATE TRIGGER memories_fts_after_update
+            AFTER UPDATE ON memories
+            BEGIN
+              DELETE FROM memories_fts WHERE rowid = old.rowid;
+              INSERT INTO memories_fts (rowid, raw_text, title, question, answer)
+              SELECT
+                new.rowid,
+                mewmew_fts_tokens(new.raw_text),
+                mewmew_fts_tokens(new.title),
+                mewmew_fts_tokens(new.question),
+                mewmew_fts_tokens(new.answer)
+              WHERE new.deleted_at IS NULL;
+            END;
+            CREATE TRIGGER memories_fts_after_delete
+            AFTER DELETE ON memories
+            BEGIN
+              DELETE FROM memories_fts WHERE rowid = old.rowid;
+            END;
+            ",
+        )
+        .expect("schema version two database should be created");
+    drop(connection);
+
+    let core = db.open_core();
+    let connection = Connection::open(&db.path).expect("database should be inspectable");
+    let fsrs_due: i64 = connection
+        .query_row(
+            "SELECT fsrs_due FROM memories WHERE id = 'legacy-card'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("legacy card should be immediately due");
+    let version: i64 = connection
+        .query_row("SELECT version FROM schema_version", [], |row| row.get(0))
+        .expect("schema version should be readable");
+    assert_eq!(fsrs_due, 123);
+    assert_eq!(version, 3);
+    drop(connection);
+
+    assert_eq!(
+        core.search_for_recall("短暂".to_owned(), 8)
+            .expect("Chinese FTS recall should survive migration")
+            .len(),
+        1
+    );
+    core.review_card("legacy-card".to_owned(), ReviewRating::Good, fsrs_due)
+        .expect("review should exercise the preserved FTS update trigger");
+    assert_eq!(
+        core.search_for_recall("短暂".to_owned(), 8)
+            .expect("Chinese FTS recall should survive an FSRS update")
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn due_cards_return_only_complete_live_cards_in_due_order_and_count_them() {
+    let db = TestDb::new();
+    let core = db.open_core();
+    let later = core
+        .add_memory(card("later", "Later", "Later?", "Yes"), 200)
+        .expect("later card should be added");
+    let first = core
+        .add_memory(card("first", "First", "First?", "Yes"), 100)
+        .expect("first card should be added");
+    core.add_memory(note("not a card", "Note"), 50)
+        .expect("note should be added");
+    core.add_memory(
+        NewMemory {
+            kind: MemoryKind::Card,
+            raw_text: "missing question".to_owned(),
+            title: "Missing question".to_owned(),
+            due_at: None,
+            question: None,
+            answer: Some("Answer".to_owned()),
+        },
+        60,
+    )
+    .expect("incomplete card should be added");
+    core.add_memory(
+        NewMemory {
+            kind: MemoryKind::Card,
+            raw_text: "blank answer".to_owned(),
+            title: "Blank answer".to_owned(),
+            due_at: None,
+            question: Some("Question".to_owned()),
+            answer: Some(String::new()),
+        },
+        70,
+    )
+    .expect("blank-answer card should be added");
+    let deleted = core
+        .add_memory(card("deleted", "Deleted", "Deleted?", "Yes"), 80)
+        .expect("deleted card should be added");
+    core.delete_memory(deleted.id, 90)
+        .expect("card should soft-delete");
+
+    assert_eq!(
+        core.due_cards(10, 150).expect("due cards should load"),
+        vec![first.clone()]
+    );
+    assert_eq!(
+        core.due_cards(10, 200).expect("due cards should load"),
+        vec![first, later]
+    );
+    assert_eq!(
+        core.due_card_count(200)
+            .expect("due card count should load"),
+        2
+    );
+    assert!(core
+        .due_cards(0, 200)
+        .expect("zero limit should be accepted")
+        .is_empty());
+}
+
+#[test]
+fn reviewing_a_new_card_good_updates_all_fsrs_state_deterministically() {
+    fn run_once() -> FsrsState {
+        let db = TestDb::new();
+        let core = db.open_core();
+        let memory = core
+            .add_memory(
+                card("deterministic", "Deterministic", "Question?", "Answer."),
+                1_000,
+            )
+            .expect("card should be added");
+        let outcome = core
+            .review_card(memory.id.clone(), ReviewRating::Good, 1_000)
+            .expect("review should succeed");
+        assert_eq!(outcome.memory.updated_at, 1_000);
+        assert_eq!(outcome.next_due_at, 1_600);
+        assert!(outcome.earned_fish);
+
+        let state = read_fsrs_state(&db, &memory.id);
+        assert_eq!(state.reps, 1);
+        assert_eq!(state.state, 1);
+        state
+    }
+
+    assert_eq!(run_once(), run_once());
+}
+
+#[test]
+fn six_consecutive_good_reviews_have_strictly_increasing_intervals() {
+    let db = TestDb::new();
+    let core = db.open_core();
+    let memory = core
+        .add_memory(
+            card("six goods", "Six goods", "Question?", "Answer."),
+            1_000,
+        )
+        .expect("card should be added");
+    let mut now = 1_000;
+    let mut previous_interval = 0;
+
+    for _ in 0..6 {
+        let outcome = core
+            .review_card(memory.id.clone(), ReviewRating::Good, now)
+            .expect("review should succeed");
+        let interval = outcome.next_due_at - now;
+        assert!(
+            interval > previous_interval,
+            "interval {interval} should exceed {previous_interval}"
+        );
+        previous_interval = interval;
+        now = outcome.next_due_at;
+    }
+}
+
+#[test]
+fn again_increases_lapses_and_pulls_the_due_time_nearer() {
+    let db = TestDb::new();
+    let core = db.open_core();
+    let memory = core
+        .add_memory(card("again", "Again", "Question?", "Answer."), 1_000)
+        .expect("card should be added");
+    let first = core
+        .review_card(memory.id.clone(), ReviewRating::Good, 1_000)
+        .expect("first good review should succeed");
+    let second = core
+        .review_card(memory.id.clone(), ReviewRating::Good, first.next_due_at)
+        .expect("second good review should succeed");
+    let before = read_fsrs_state(&db, &memory.id);
+    let previous_interval = second.next_due_at - first.next_due_at;
+
+    let forgotten = core
+        .review_card(memory.id.clone(), ReviewRating::Again, second.next_due_at)
+        .expect("again review should succeed");
+    let after = read_fsrs_state(&db, &memory.id);
+
+    assert_eq!(after.lapses, before.lapses + 1);
+    assert!(forgotten.next_due_at - second.next_due_at < previous_interval);
+}
+
+#[test]
+fn good_and_easy_add_fish_while_again_and_hard_do_not() {
+    let db = TestDb::new();
+    let core = db.open_core();
+    let ratings = [
+        (ReviewRating::Again, false),
+        (ReviewRating::Hard, false),
+        (ReviewRating::Good, true),
+        (ReviewRating::Easy, true),
+    ];
+
+    for (index, (rating, earned_fish)) in ratings.into_iter().enumerate() {
+        let memory = core
+            .add_memory(
+                card(
+                    &format!("fish {index}"),
+                    &format!("Fish {index}"),
+                    "Question?",
+                    "Answer.",
+                ),
+                1_000,
+            )
+            .expect("card should be added");
+        let before = core.cat_status().expect("cat should be readable").fish;
+        let outcome = core
+            .review_card(memory.id, rating, 1_000)
+            .expect("review should succeed");
+        let after = core.cat_status().expect("cat should be readable").fish;
+
+        assert_eq!(outcome.earned_fish, earned_fish);
+        assert_eq!(after - before, i64::from(earned_fish));
+    }
+}
+
+#[test]
+fn review_rejects_missing_deleted_non_card_and_incomplete_cards() {
+    let db = TestDb::new();
+    let core = db.open_core();
+    let note = core
+        .add_memory(note("note", "Note"), 100)
+        .expect("note should be added");
+    let no_question = core
+        .add_memory(
+            NewMemory {
+                kind: MemoryKind::Card,
+                raw_text: "no question".to_owned(),
+                title: "No question".to_owned(),
+                due_at: None,
+                question: None,
+                answer: Some("Answer.".to_owned()),
+            },
+            100,
+        )
+        .expect("incomplete card should be added");
+    let blank_answer = core
+        .add_memory(
+            NewMemory {
+                kind: MemoryKind::Card,
+                raw_text: "blank answer".to_owned(),
+                title: "Blank answer".to_owned(),
+                due_at: None,
+                question: Some("Question?".to_owned()),
+                answer: Some("  ".to_owned()),
+            },
+            100,
+        )
+        .expect("incomplete card should be added");
+    let deleted = core
+        .add_memory(card("deleted", "Deleted", "Question?", "Answer."), 100)
+        .expect("card should be added");
+    core.delete_memory(deleted.id.clone(), 101)
+        .expect("card should soft-delete");
+
+    assert_eq!(
+        core.review_card("missing".to_owned(), ReviewRating::Good, 200),
+        Err(CoreError::NotFound)
+    );
+    assert_eq!(
+        core.review_card(deleted.id, ReviewRating::Good, 200),
+        Err(CoreError::NotFound)
+    );
+    for id in [note.id, no_question.id, blank_answer.id] {
+        assert!(matches!(
+            core.review_card(id, ReviewRating::Good, 200),
+            Err(CoreError::Invalid(_))
+        ));
+    }
+    assert_eq!(core.cat_status().expect("cat should be readable").fish, 0);
 }
