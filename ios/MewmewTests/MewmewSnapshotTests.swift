@@ -6,7 +6,7 @@ import XCTest
 
 @MainActor
 final class MewmewSnapshotTests: XCTestCase {
-    func testCatHomeHappy() {
+    func testCatHomeHappyWithFishBowl() {
         assertLightAndDark(
             CatHomeView(
                 status: CatStatus(
@@ -32,11 +32,11 @@ final class MewmewSnapshotTests: XCTestCase {
                 onSelectOutfit: { _ in },
                 onLockedOutfit: { _ in }
             ),
-            named: "cat-home-happy"
+            named: "cat-home-happy-with-fish-bowl"
         )
     }
 
-    func testCatHomeContent() {
+    func testCatHomeContentWithoutFishBowl() {
         assertLightAndDark(
             makeCatHome(
                 status: CatStatus(
@@ -47,11 +47,11 @@ final class MewmewSnapshotTests: XCTestCase {
                     outfit: "none"
                 )
             ),
-            named: "cat-home-content"
+            named: "cat-home-content-without-fish-bowl"
         )
     }
 
-    func testCatHomeSleepy() {
+    func testCatHomeSleepyWithZzzAndFishBowl() {
         assertLightAndDark(
             makeCatHome(
                 status: CatStatus(
@@ -62,7 +62,7 @@ final class MewmewSnapshotTests: XCTestCase {
                     outfit: "none"
                 )
             ),
-            named: "cat-home-sleepy"
+            named: "cat-home-sleepy-with-zzz-and-fish-bowl"
         )
     }
 
@@ -315,6 +315,11 @@ final class MewmewSnapshotTests: XCTestCase {
                 makeView()
                     .environment(\.colorScheme, scheme)
                     .environment(\.locale, Locale(identifier: "zh_Hans_CN"))
+                    .environment(\.accessibilityReduceMotion, true)
+                    .transaction { transaction in
+                        transaction.animation = nil
+                        transaction.disablesAnimations = true
+                    }
             )
             let controller = UIHostingController(rootView: themedView)
             controller.overrideUserInterfaceStyle = scheme == .dark ? .dark : .light

@@ -4,6 +4,7 @@ import UIKit
 enum Theme {
     static let background = Color(lightHex: "#FFFFFF", darkHex: "#111113")
     static let surface = Color(lightHex: "#F6F6F7", darkHex: "#1B1B1F")
+    static let surfaceDeep = Color(lightHex: "#ECECEE", darkHex: "#26262C")
     static let accent = Color(hex: "#F97316")
     static let primaryText = Color(lightHex: "#18181B", darkHex: "#F4F4F5")
     static let secondaryText = Color(hex: "#71717A")
@@ -12,6 +13,7 @@ enum Theme {
     static let completed = Color(hex: "#16A34A")
 
     static let cornerRadius: CGFloat = 12
+    static let stageCornerRadius: CGFloat = 26
     static let borderWidth: CGFloat = 1
 }
 

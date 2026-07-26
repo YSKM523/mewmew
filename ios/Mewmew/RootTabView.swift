@@ -2,6 +2,7 @@ import SwiftUI
 
 @MainActor
 struct RootTabView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var model: AppModel
 
     var body: some View {
@@ -12,7 +13,7 @@ struct RootTabView: View {
                 dueCardCount: model.dueCardCount,
                 showsConfirmation: model.showsConfirmation,
                 unlockedOutfits: model.unlockedOutfits,
-                isCatAnimated: true,
+                isCatAnimated: !reduceMotion,
                 isFeeding: model.isFeedingCat,
                 showsLevelUp: model.showsLevelUp,
                 feedTrigger: model.feedAnimationEvent,

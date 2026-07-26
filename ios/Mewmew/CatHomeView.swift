@@ -19,13 +19,20 @@ struct CatHomeView: View {
     let onLockedOutfit: (Int64) -> Void
 
     @State private var isOutfitPickerPresented = false
+    @State private var levelBadgeScale: CGFloat = 1
 
     var body: some View {
         GeometryReader { proxy in
             ScrollView {
-                VStack(spacing: 24) {
+                VStack(spacing: 0) {
                     catStage
-                        .frame(minHeight: max(340, proxy.size.height * 0.5))
+                        .frame(minHeight: max(430, proxy.size.height * 0.53))
+                        .background(Theme.surface)
+                        .clipShape(
+                            RoundedRectangle(
+                                cornerRadius: Theme.stageCornerRadius
+                            )
+                        )
 
                     Button(action: onCapture) {
                         Text("记一下…")
@@ -39,10 +46,13 @@ struct CatHomeView: View {
                     .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
                     .contentShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
                     .accessibilityIdentifier("capture-button")
+                    .padding(.top, 30)
 
                     todaySection
+                        .padding(.top, 30)
                 }
                 .padding(.horizontal, 20)
+                .padding(.top, 12)
                 .padding(.bottom, 28)
             }
             .background(Theme.background)
@@ -57,10 +67,16 @@ struct CatHomeView: View {
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
         }
+        .transaction { transaction in
+            if !isCatAnimated {
+                transaction.animation = nil
+                transaction.disablesAnimations = true
+            }
+        }
     }
 
     private var catStage: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 0) {
             HStack {
                 Spacer()
                 Button {
@@ -71,7 +87,7 @@ struct CatHomeView: View {
                         .foregroundStyle(Theme.primaryText)
                         .padding(.horizontal, 11)
                         .padding(.vertical, 8)
-                        .background(Theme.surface)
+                        .background(Theme.background)
                         .clipShape(
                             RoundedRectangle(
                                 cornerRadius: Theme.cornerRadius
@@ -91,74 +107,82 @@ struct CatHomeView: View {
                 .accessibilityIdentifier("outfit-button")
             }
 
-            CatPresentation(
+            CatScene(
                 mood: status.mood,
                 outfit: status.outfit,
+                fishCount: status.fish,
                 isAnimated: isCatAnimated,
+                isFeeding: isFeeding,
                 feedTrigger: feedTrigger,
                 levelUpTrigger: levelUpTrigger
             )
-            .frame(width: 240, height: 240)
-            .scaleEffect(isFeeding ? 1.06 : 1)
-            .offset(y: isFeeding ? 5 : 0)
-            .animation(
-                .spring(response: 0.3, dampingFraction: 0.68),
-                value: isFeeding
-            )
-            .accessibilityIdentifier("cat-view")
+            .frame(height: 232)
+            .padding(.top, 4)
                 .overlay(alignment: .topTrailing) {
                     if showsConfirmation {
-                        Text("记住啦!")
+                        Text("记住啦")
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(Theme.primaryText)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
-                            .background(Theme.surface)
+                            .background(Theme.background)
                             .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
                             .overlay {
                                 RoundedRectangle(cornerRadius: Theme.cornerRadius)
                                     .stroke(Theme.border, lineWidth: Theme.borderWidth)
                             }
-                            .offset(x: 42, y: -12)
+                            .offset(x: 4, y: 4)
+                            .transition(
+                                .scale(scale: 0.72, anchor: .bottomLeading)
+                                    .combined(with: .opacity)
+                            )
                             .accessibilityIdentifier("capture-confirmation")
                     }
                 }
+                .animation(
+                    isCatAnimated
+                        ? .spring(response: 0.36, dampingFraction: 0.72)
+                        : nil,
+                    value: showsConfirmation
+                )
 
             Text(moodMessage)
                 .font(.body)
                 .foregroundStyle(Theme.primaryText)
+                .padding(.top, 8)
 
             HStack(spacing: 12) {
-                Text("🐟 ×\(status.fish)")
-                    .font(.body)
-                    .foregroundStyle(Theme.secondaryText)
+                HStack(spacing: 4) {
+                    Text("🐟")
+                    Text("×\(status.fish)")
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                }
+                .font(.body)
+                .foregroundStyle(Theme.secondaryText)
+                .animation(
+                    isCatAnimated ? .easeOut(duration: 0.3) : nil,
+                    value: status.fish
+                )
+                .accessibilityElement(children: .ignore)
                     .accessibilityLabel("小鱼干 \(status.fish) 条")
 
-                if status.fish > 0 {
-                    Button("喂猫", action: onFeed)
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Color.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(Theme.accent)
-                        .clipShape(
-                            RoundedRectangle(
-                                cornerRadius: Theme.cornerRadius
-                            )
-                        )
-                        .buttonStyle(.plain)
-                        .disabled(isFeeding)
-                        .opacity(isFeeding ? 0.55 : 1)
-                        .accessibilityIdentifier("feed-cat-button")
-                }
+                Button("喂猫", action: onFeed)
+                    .buttonStyle(
+                        FeedButtonStyle(isAnimated: isCatAnimated)
+                    )
+                    .disabled(isFeeding)
+                    .opacity(isFeeding ? 0.55 : 1)
+                    .accessibilityIdentifier("feed-cat-button")
             }
+            .padding(.top, 12)
 
             levelProgress
                 .frame(maxWidth: 280)
-
-            Spacer(minLength: 6)
+                .padding(.top, 14)
         }
         .frame(maxWidth: .infinity)
+        .padding(20)
     }
 
     private var levelProgress: some View {
@@ -172,17 +196,17 @@ struct CatHomeView: View {
                 Text("Lv.\(status.level)")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(Theme.primaryText)
-                    .scaleEffect(showsLevelUp ? 1.18 : 1)
-                    .animation(
-                        .spring(response: 0.3, dampingFraction: 0.58),
-                        value: showsLevelUp
-                    )
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Theme.background)
+                    .clipShape(Capsule())
+                    .scaleEffect(levelBadgeScale)
 
                 if showsLevelUp {
-                    Text("长大啦!")
+                    Text("长大啦")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(Theme.accent)
-                        .transition(.scale.combined(with: .opacity))
+                        .transition(.opacity)
                 }
 
                 Spacer()
@@ -206,16 +230,23 @@ struct CatHomeView: View {
             }
             .frame(height: 3)
             .animation(
-                .easeOut(duration: 0.45),
+                isCatAnimated ? .easeOut(duration: 0.6) : nil,
                 value: status.xp
             )
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("等级进度")
-            .accessibilityValue(
-                "\(Int((progress.fraction * 100).rounded()))%"
-            )
+            .accessibilityValue("\(progress.percentage)%")
         }
-        .animation(.easeOut(duration: 0.2), value: showsLevelUp)
+        .animation(
+            isCatAnimated ? .easeOut(duration: 0.2) : nil,
+            value: showsLevelUp
+        )
+        .onAppear {
+            updateLevelBadge(for: showsLevelUp)
+        }
+        .onChange(of: showsLevelUp) { _, isShowing in
+            updateLevelBadge(for: isShowing)
+        }
     }
 
     private var moodMessage: String {
@@ -252,6 +283,24 @@ struct CatHomeView: View {
             }
         }
     }
+
+    private func updateLevelBadge(for isShowing: Bool) {
+        guard isShowing, isCatAnimated else {
+            levelBadgeScale = 1
+            return
+        }
+
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.62)) {
+            levelBadgeScale = 1.25
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 240_000_000)
+            guard showsLevelUp else { return }
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.72)) {
+                levelBadgeScale = 1
+            }
+        }
+    }
 }
 
 private struct TodaySummaryCard: View {
@@ -277,7 +326,7 @@ private struct TodaySummaryCard: View {
                     .foregroundStyle(Theme.secondaryText)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
+            .padding(20)
             .background(Theme.surface)
             .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
             .overlay {
@@ -292,5 +341,168 @@ private struct TodaySummaryCard: View {
         .accessibilityHint(
             Text(isEnabled ? "打开" : "暂无可复习卡片")
         )
+    }
+}
+
+private struct CatScene: View {
+    let mood: String
+    let outfit: String
+    let fishCount: Int64
+    let isAnimated: Bool
+    let isFeeding: Bool
+    let feedTrigger: Int
+    let levelUpTrigger: Int
+
+    @State private var isZzzFloating = false
+
+    private var sceneState: CatHomeSceneState {
+        CatHomeSceneState(fishCount: fishCount)
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            Ellipse()
+                .fill(Theme.surfaceDeep)
+                .frame(width: 272, height: 58)
+                .offset(y: -2)
+                .accessibilityHidden(true)
+
+            CatPresentation(
+                mood: mood,
+                outfit: outfit,
+                isAnimated: isAnimated,
+                feedTrigger: feedTrigger,
+                levelUpTrigger: levelUpTrigger
+            )
+            .frame(width: 224, height: 224)
+            .scaleEffect(isFeeding ? 1.06 : 1)
+            .offset(y: isFeeding ? -1 : -6)
+            .animation(
+                isAnimated
+                    ? .spring(response: 0.3, dampingFraction: 0.68)
+                    : nil,
+                value: isFeeding
+            )
+            .accessibilityIdentifier("cat-view")
+
+            if sceneState.showsFishBowl {
+                FishBowl(fishCount: fishCount)
+                    .frame(width: 58, height: 40)
+                    .offset(x: 102, y: -2)
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
+                    .accessibilityIdentifier("fish-bowl")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .topTrailing) {
+            if mood == "sleepy" {
+                Text("Zzz")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.secondaryText)
+                    .offset(x: -34, y: isZzzFloating ? -5 : 2)
+                    .accessibilityIdentifier("sleepy-zzz")
+            }
+        }
+        .animation(
+            isAnimated ? .easeOut(duration: 0.22) : nil,
+            value: sceneState.showsFishBowl
+        )
+        .onAppear {
+            updateZzzAnimation()
+        }
+        .onChange(of: isAnimated) { _, _ in
+            updateZzzAnimation()
+        }
+        .onChange(of: mood) { _, _ in
+            updateZzzAnimation()
+        }
+    }
+
+    private func updateZzzAnimation() {
+        guard isAnimated, mood == "sleepy" else {
+            isZzzFloating = false
+            return
+        }
+        withAnimation(
+            .easeInOut(duration: 1.25).repeatForever(autoreverses: true)
+        ) {
+            isZzzFloating = true
+        }
+    }
+}
+
+private struct FishBowl: View {
+    let fishCount: Int64
+
+    private var visibleFishCount: Int {
+        Int(min(max(fishCount, 1), 3))
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            BowlBodyShape()
+                .fill(Theme.accent)
+                .frame(width: 52, height: 27)
+                .offset(y: 8)
+
+            Ellipse()
+                .fill(Theme.surfaceDeep)
+                .frame(width: 52, height: 13)
+                .overlay {
+                    Ellipse()
+                        .stroke(Theme.accent, lineWidth: 2)
+                }
+
+            HStack(spacing: 1) {
+                ForEach(0..<visibleFishCount, id: \.self) { _ in
+                    Image(systemName: "fish.fill")
+                        .font(.system(size: 7, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                }
+            }
+            .offset(y: 2)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct BowlBodyShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.midX, y: rect.maxY),
+            control: CGPoint(x: rect.minX + rect.width * 0.12, y: rect.maxY)
+        )
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY),
+            control: CGPoint(x: rect.maxX - rect.width * 0.12, y: rect.maxY)
+        )
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct FeedButtonStyle: ButtonStyle {
+    let isAnimated: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(Color.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Theme.accent)
+            .clipShape(
+                RoundedRectangle(cornerRadius: Theme.cornerRadius)
+            )
+            .contentShape(
+                RoundedRectangle(cornerRadius: Theme.cornerRadius)
+            )
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(
+                isAnimated ? .easeOut(duration: 0.12) : nil,
+                value: configuration.isPressed
+            )
     }
 }

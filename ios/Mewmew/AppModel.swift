@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import SwiftUI
 import UIKit
 
 @MainActor
@@ -149,6 +150,7 @@ final class AppModel: ObservableObject, NotificationSchedulerDelegate {
     func feedCat() async {
         guard !isFeedingCat else { return }
         guard catStatus.fish > 0 else {
+            HapticFeedback.warning()
             errorMessage = "没有小鱼干了,完成提醒或复习就能得到"
             return
         }
@@ -159,18 +161,33 @@ final class AppModel: ObservableObject, NotificationSchedulerDelegate {
 
         do {
             let now = currentTimestamp()
-            catStatus = try await client.feedCat(now: now)
+            let fedStatus = try await client.feedCat(now: now)
+            withAnimation(.easeOut(duration: 0.3)) {
+                catStatus = fedStatus
+            }
             feedAnimationEvent += 1
-            catStatus = try await client.catStatusAt(now: now)
+            HapticFeedback.lightImpact()
+
+            let refreshedStatus = try await client.catStatusAt(now: now)
+            withAnimation(.easeOut(duration: 0.3)) {
+                catStatus = refreshedStatus
+            }
             unlockedOutfits = Set(try await client.unlockedOutfits())
 
             if catStatus.level > previousLevel {
                 levelUpAnimationEvent += 1
                 showLevelUpFeedback()
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 180_000_000)
+                    HapticFeedback.lightImpact()
+                }
             }
 
             try? await Task.sleep(nanoseconds: 450_000_000)
         } catch {
+            if isOutOfFishError(error) {
+                HapticFeedback.warning()
+            }
             errorMessage = friendlyCatErrorMessage(for: error)
         }
     }
@@ -497,9 +514,18 @@ final class AppModel: ObservableObject, NotificationSchedulerDelegate {
     private func showLevelUpFeedback() {
         showsLevelUp = true
         Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 1_600_000_000)
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
             self?.showsLevelUp = false
         }
+    }
+
+    private func isOutOfFishError(_ error: Error) -> Bool {
+        guard let coreError = error as? CoreError,
+            case let .Invalid(message) = coreError
+        else {
+            return false
+        }
+        return message == "没有小鱼干了"
     }
 
     private func friendlyCatErrorMessage(for error: Error) -> String {

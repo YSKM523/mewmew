@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct MemoriesView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let memories: [Memory]
     @Binding var filter: MemoryFilter
     @Binding var searchText: String
@@ -169,6 +171,10 @@ struct MemoriesView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .background(Theme.background)
+            .animation(
+                reduceMotion ? nil : .easeInOut(duration: 0.28),
+                value: filteredMemories.map(\.id)
+            )
             .onAppear {
                 scrollToFocusedMemory(using: proxy)
             }

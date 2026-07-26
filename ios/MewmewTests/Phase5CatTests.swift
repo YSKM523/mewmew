@@ -36,6 +36,31 @@ final class Phase5CatTests: XCTestCase {
         }
     }
 
+    func testLevelProgressRoundsDisplayPercentage() {
+        let cases: [(xp: Int64, percentage: Int)] = [
+            (0, 0),
+            (15, 50),
+            (29, 97),
+            (30, 0),
+            (55, 50),
+        ]
+
+        for item in cases {
+            XCTAssertEqual(
+                CatLevelProgress(xp: item.xp).percentage,
+                item.percentage,
+                "xp=\(item.xp)"
+            )
+        }
+    }
+
+    func testFishBowlOnlyShowsWhenFishRemain() {
+        XCTAssertFalse(CatHomeSceneState(fishCount: 0).showsFishBowl)
+        XCTAssertFalse(CatHomeSceneState(fishCount: -1).showsFishBowl)
+        XCTAssertTrue(CatHomeSceneState(fishCount: 1).showsFishBowl)
+        XCTAssertTrue(CatHomeSceneState(fishCount: 56).showsFishBowl)
+    }
+
     func testFeedInvalidShowsFriendlyMessageWithoutChangingStatus() async {
         let originalStatus = CatStatus(
             level: 1,

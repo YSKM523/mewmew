@@ -4,6 +4,10 @@ struct CatLevelProgress: Equatable {
     let level: Int64
     let fraction: Double
 
+    var percentage: Int {
+        Int((fraction * 100).rounded())
+    }
+
     init(xp: Int64) {
         let clampedXP = max(0, xp)
         let level = Self.level(for: clampedXP)

@@ -114,6 +114,12 @@ final class ReviewSessionModel: ObservableObject, Identifiable {
             if outcome.earnedFish {
                 earnedFishCount += 1
             }
+            switch rating {
+            case .hard, .good, .easy:
+                HapticFeedback.lightImpact()
+            case .again:
+                break
+            }
 
             currentIndex += 1
             isAnswerRevealed = false
