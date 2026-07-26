@@ -315,7 +315,6 @@ final class MewmewSnapshotTests: XCTestCase {
                 makeView()
                     .environment(\.colorScheme, scheme)
                     .environment(\.locale, Locale(identifier: "zh_Hans_CN"))
-                    .environment(\.accessibilityReduceMotion, true)
                     .transaction { transaction in
                         transaction.animation = nil
                         transaction.disablesAnimations = true
