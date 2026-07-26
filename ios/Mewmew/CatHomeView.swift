@@ -9,6 +9,8 @@ struct CatHomeView: View {
     let isCatAnimated: Bool
     let isFeeding: Bool
     let showsLevelUp: Bool
+    let feedTrigger: Int
+    let levelUpTrigger: Int
     let onCapture: () -> Void
     let onSelectToday: (MemoryFilter) -> Void
     let onReview: () -> Void
@@ -89,10 +91,12 @@ struct CatHomeView: View {
                 .accessibilityIdentifier("outfit-button")
             }
 
-            CatView(
+            CatPresentation(
                 mood: status.mood,
                 outfit: status.outfit,
-                isAnimated: isCatAnimated
+                isAnimated: isCatAnimated,
+                feedTrigger: feedTrigger,
+                levelUpTrigger: levelUpTrigger
             )
             .frame(width: 240, height: 240)
             .scaleEffect(isFeeding ? 1.06 : 1)

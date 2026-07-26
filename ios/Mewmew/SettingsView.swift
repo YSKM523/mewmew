@@ -20,6 +20,10 @@ struct SettingsView: View {
                         value: isClassifierConfigured ? "已启用" : "未配置"
                     )
                     LabeledContent(
+                        "猫",
+                        value: CatPresentation.currentRenderingMode.title
+                    )
+                    LabeledContent(
                         "已排期提醒",
                         value: "\(scheduledReminderCount) 条"
                     )

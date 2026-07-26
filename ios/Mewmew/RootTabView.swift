@@ -15,6 +15,8 @@ struct RootTabView: View {
                 isCatAnimated: true,
                 isFeeding: model.isFeedingCat,
                 showsLevelUp: model.showsLevelUp,
+                feedTrigger: model.feedAnimationEvent,
+                levelUpTrigger: model.levelUpAnimationEvent,
                 onCapture: model.openCapture,
                 onSelectToday: model.selectToday,
                 onReview: model.openReviewSession,

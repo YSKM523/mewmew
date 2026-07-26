@@ -8,6 +8,9 @@ options:
     iOS: "17.0"
 
 packages:
+  RiveRuntime:
+    url: https://github.com/rive-app/rive-ios
+    exactVersion: 6.21.1
   SnapshotTesting:
     url: https://github.com/pointfreeco/swift-snapshot-testing
     exactVersion: 1.12.0
@@ -31,6 +34,8 @@ targets:
       - framework: ../core/build/swift/MewmewCore.xcframework
         embed: false
         link: true
+      - package: RiveRuntime
+        product: RiveRuntime
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tensorproxies.mewmew

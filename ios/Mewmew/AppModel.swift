@@ -17,6 +17,8 @@ final class AppModel: ObservableObject, NotificationSchedulerDelegate {
     @Published private(set) var unlockedOutfits: Set<String> = ["none"]
     @Published private(set) var isFeedingCat = false
     @Published private(set) var showsLevelUp = false
+    @Published private(set) var feedAnimationEvent = 0
+    @Published private(set) var levelUpAnimationEvent = 0
     @Published var isCapturePresented = false
     @Published var showsConfirmation = false
     @Published var toastMessage: String?
@@ -158,10 +160,12 @@ final class AppModel: ObservableObject, NotificationSchedulerDelegate {
         do {
             let now = currentTimestamp()
             catStatus = try await client.feedCat(now: now)
+            feedAnimationEvent += 1
             catStatus = try await client.catStatusAt(now: now)
             unlockedOutfits = Set(try await client.unlockedOutfits())
 
             if catStatus.level > previousLevel {
+                levelUpAnimationEvent += 1
                 showLevelUpFeedback()
             }
 

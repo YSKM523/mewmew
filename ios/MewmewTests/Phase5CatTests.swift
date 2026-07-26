@@ -4,6 +4,17 @@ import XCTest
 
 @MainActor
 final class Phase5CatTests: XCTestCase {
+    func testCatPresentationUsesBuiltInRendererWithoutRiveResource() {
+        XCTAssertNil(
+            Bundle.main.url(forResource: "cat", withExtension: "riv"),
+            "This regression test covers the repository state without cat.riv"
+        )
+        XCTAssertEqual(
+            CatPresentation.currentRenderingMode,
+            .builtIn
+        )
+    }
+
     func testLevelProgressUsesCoreThresholdsAtBoundaries() {
         let cases: [(xp: Int64, level: Int64, fraction: Double)] = [
             (29, 1, 29.0 / 30.0),
@@ -92,14 +103,58 @@ final class Phase5CatTests: XCTestCase {
         let feedCallCount = await core.receivedFeedCallCount()
         XCTAssertEqual(feedCallCount, 0)
     }
+
+    func testSuccessfulFeedPublishesAnimationEvents() async {
+        let originalStatus = CatStatus(
+            level: 1,
+            xp: 29,
+            fish: 1,
+            mood: "happy",
+            outfit: "none"
+        )
+        let fedStatus = CatStatus(
+            level: 2,
+            xp: 30,
+            fish: 0,
+            mood: "happy",
+            outfit: "none"
+        )
+        let core = Phase5FakeCore(
+            status: originalStatus,
+            successfulFeedStatus: fedStatus
+        )
+        let model = AppModel(
+            client: core,
+            parseClient: Phase5NoopParseClient(),
+            recallClient: Phase5NoopRecallClient(),
+            notificationScheduler: Phase5NoopNotificationScheduler(),
+            promptDefaults: UserDefaults.standard,
+            currentTimestamp: { TestFixtures.now },
+            currentDate: {
+                Date(timeIntervalSince1970: TimeInterval(TestFixtures.now))
+            }
+        )
+
+        await model.refresh()
+        await model.feedCat()
+
+        XCTAssertEqual(model.catStatus, fedStatus)
+        XCTAssertEqual(model.feedAnimationEvent, 1)
+        XCTAssertEqual(model.levelUpAnimationEvent, 1)
+    }
 }
 
 private actor Phase5FakeCore: CoreClientProtocol {
-    private let status: CatStatus
+    private var status: CatStatus
+    private let successfulFeedStatus: CatStatus?
     private var feedCallCount = 0
 
-    init(status: CatStatus) {
+    init(
+        status: CatStatus,
+        successfulFeedStatus: CatStatus? = nil
+    ) {
         self.status = status
+        self.successfulFeedStatus = successfulFeedStatus
     }
 
     func addMemory(memory: NewMemory, now: Int64) async throws -> Memory {
@@ -150,6 +205,10 @@ private actor Phase5FakeCore: CoreClientProtocol {
 
     func feedCat(now: Int64) async throws -> CatStatus {
         feedCallCount += 1
+        if let successfulFeedStatus {
+            status = successfulFeedStatus
+            return successfulFeedStatus
+        }
         throw CoreError.Invalid("没有小鱼干了")
     }
 
