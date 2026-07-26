@@ -394,12 +394,14 @@ private struct CatScene: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay(alignment: .topTrailing) {
+        .overlay(alignment: .bottom) {
+            // Anchored to the cat's head, not the card corner: pinned to the
+            // corner it read as a stray label rather than a sleeping cat.
             if mood == "sleepy" {
                 Text("Zzz")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.secondaryText)
-                    .offset(x: -34, y: isZzzFloating ? -5 : 2)
+                    .offset(x: 82, y: isZzzFloating ? -203 : -196)
                     .accessibilityIdentifier("sleepy-zzz")
             }
         }
